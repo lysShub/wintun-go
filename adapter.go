@@ -12,12 +12,14 @@ import (
 )
 
 type Adapter struct {
+	wintun *Wintun
+
 	handle uintptr
 }
 
 // Close releases Wintun adapter resources and, if adapter was created with CreateAdapter, removes adapter.
 func (a *Adapter) Close() error {
-	_, _, err := syscall.SyscallN(wintunCloseAdapter, a.handle)
+	_, _, err := syscall.SyscallN(a.wintun.wintunCloseAdapter, a.handle)
 	if err != syscall.Errno(0) {
 		return err
 	}
@@ -27,7 +29,7 @@ func (a *Adapter) Close() error {
 // GetAdapterLuid returns the LUID of the adapter.
 func (a *Adapter) GetAdapterLuid() (uint64, error) {
 	var luid uint64
-	_, _, err := syscall.SyscallN(wintunGetAdapterLuid, a.handle, uintptr(unsafe.Pointer(&luid)))
+	_, _, err := syscall.SyscallN(a.wintun.wintunGetAdapterLuid, a.handle, uintptr(unsafe.Pointer(&luid)))
 	if err != syscall.Errno(0) {
 		return 0, err
 	}
@@ -57,30 +59,37 @@ func (a *Adapter) InterfaceIndex() (int, error) {
 	return int(idx), nil
 }
 
-type Session uintptr
+type Session struct {
+	wintun *Wintun
+
+	handle uintptr
+}
 
 // StartSession starts Wintun session.
 //
 //	capacity: rings capacity, must be between MIN_RING_CAPACITY and MAX_RING_CAPACITY, must be a power of two.
-func (a *Adapter) StartSession(capacity uint32) (Session, error) {
-	r1, _, err := syscall.SyscallN(wintunStartSession, a.handle, uintptr(capacity))
+func (a *Adapter) StartSession(capacity uint32) (*Session, error) {
+	r1, _, err := syscall.SyscallN(a.wintun.wintunStartSession, a.handle, uintptr(capacity))
 	if r1 == 0 {
-		return 0, err
+		return nil, err
 	}
-	return Session(r1), nil
+	return &Session{
+		wintun: a.wintun,
+		handle: r1,
+	}, nil
 }
 
 // Close ends Wintun session.
-func (s Session) Close() error {
-	_, _, err := syscall.SyscallN(wintunEndSession, uintptr(s))
+func (s *Session) Close() error {
+	_, _, err := syscall.SyscallN(s.wintun.wintunEndSession, uintptr(s.handle))
 	if err != syscall.Errno(0) {
 		return err
 	}
 	return nil
 }
 
-func (s Session) getReadWaitEvent() (windows.Handle, error) {
-	r0, _, err := syscall.SyscallN(wintunGetReadWaitEvent, uintptr(s))
+func (s *Session) getReadWaitEvent() (windows.Handle, error) {
+	r0, _, err := syscall.SyscallN(s.wintun.wintunGetReadWaitEvent, uintptr(s.handle))
 	if err != syscall.Errno(0) {
 		return windows.InvalidHandle, err
 	}
@@ -98,10 +107,10 @@ type Packet []byte
 //	 *         ERROR_HANDLE_EOF     Wintun adapter is terminating;
 //	 *         ERROR_NO_MORE_ITEMS  Wintun buffer is exhausted;
 //	 *         ERROR_INVALID_DATA   Wintun buffer is corrupt
-func (s Session) ReceivePacket() (rp Packet, err error) {
+func (s *Session) ReceivePacket() (rp Packet, err error) {
 	var size uint32
 	for {
-		r0, _, err := syscall.SyscallN(wintunReceivePacket, uintptr(s), (uintptr)(unsafe.Pointer(&size)))
+		r0, _, err := syscall.SyscallN(s.wintun.wintunReceivePacket, uintptr(s.handle), (uintptr)(unsafe.Pointer(&size)))
 		if r0 == 0 {
 			if err == windows.ERROR_NO_MORE_ITEMS {
 				hdl, err := s.getReadWaitEvent()
@@ -130,8 +139,8 @@ func (s Session) ReceivePacket() (rp Packet, err error) {
 //	If the function fails, possible errors include the following:
 //	 *         ERROR_HANDLE_EOF       Wintun adapter is terminating;
 //	 *         ERROR_BUFFER_OVERFLOW  Wintun buffer is full;
-func (s Session) AllocateSendPacket(packetSize uint32) (Packet, error) {
-	r0, _, err := syscall.SyscallN(wintunAllocateSendPacket, uintptr(s), uintptr(packetSize))
+func (s *Session) AllocateSendPacket(packetSize uint32) (Packet, error) {
+	r0, _, err := syscall.SyscallN(s.wintun.wintunAllocateSendPacket, uintptr(s.handle), uintptr(packetSize))
 	if r0 == 0 {
 		return nil, err
 	}
@@ -143,10 +152,10 @@ func (s Session) AllocateSendPacket(packetSize uint32) (Packet, error) {
 // SendPacket sends the packet and releases internal buffer.
 // is thread-safe, but the AllocateSendPacket order of calls define
 // the packet sending order. this means the packet is not guaranteed to be sent in the SendPacket yet.
-func (s Session) SendPacket(p Packet) error {
+func (s *Session) SendPacket(p Packet) error {
 	_, _, err := syscall.SyscallN(
-		wintunSendPacket,
-		uintptr(s),
+		s.wintun.wintunSendPacket,
+		uintptr(s.handle),
 		uintptr(unsafe.Pointer(&p[0])),
 	)
 	if err != syscall.Errno(0) {
@@ -159,8 +168,8 @@ func (s Session) SendPacket(p Packet) error {
 // this function is thread-safe.
 func (s Session) Release(p Packet) error {
 	_, _, err := syscall.SyscallN(
-		wintunReleaseReceivePacket,
-		uintptr(s),
+		s.wintun.wintunReleaseReceivePacket,
+		uintptr(s.handle),
 		uintptr(unsafe.Pointer(&p[0])),
 	)
 	if err != syscall.Errno(0) {

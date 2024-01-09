@@ -4,62 +4,65 @@
 package wintun
 
 import (
-	"sync"
-
 	"github.com/lysShub/go-dll"
 )
 
-func LoadDLL[T string | dll.MemDLL](d T) error {
+func LoadWintun[T string | dll.MemDLL](d T) (*Wintun, error) {
 	var err error
-	wintunDllLoadOnec.Do(func() {
-		wintunDll, err = dll.LoadDLL(d)
-		if err == nil {
-			if wintunCreateAdapter, err = wintunDll.FindProc("WintunCreateAdapter"); err != nil {
-				return
-			}
-			if wintunOpenAdapter, err = wintunDll.FindProc("WintunOpenAdapter"); err != nil {
-				return
-			}
-			if wintunCloseAdapter, err = wintunDll.FindProc("WintunCloseAdapter"); err != nil {
-				return
-			}
-			if wintunDeleteDriver, err = wintunDll.FindProc("WintunDeleteDriver"); err != nil {
-				return
-			}
-			if wintunGetAdapterLuid, err = wintunDll.FindProc("WintunGetAdapterLUID"); err != nil {
-				return
-			}
-			if wintunGetRunningDriverVersion, err = wintunDll.FindProc("WintunGetRunningDriverVersion"); err != nil {
-				return
-			}
-			if wintunSetLogger, err = wintunDll.FindProc("WintunSetLogger"); err != nil {
-				return
-			}
-			if wintunStartSession, err = wintunDll.FindProc("WintunStartSession"); err != nil {
-				return
-			}
-			if wintunEndSession, err = wintunDll.FindProc("WintunEndSession"); err != nil {
-				return
-			}
-			if wintunGetReadWaitEvent, err = wintunDll.FindProc("WintunGetReadWaitEvent"); err != nil {
-				return
-			}
-			if wintunReceivePacket, err = wintunDll.FindProc("WintunReceivePacket"); err != nil {
-				return
-			}
-			if wintunReleaseReceivePacket, err = wintunDll.FindProc("WintunReleaseReceivePacket"); err != nil {
-				return
-			}
-			if wintunAllocateSendPacket, err = wintunDll.FindProc("WintunAllocateSendPacket"); err != nil {
-				return
-			}
-			if wintunSendPacket, err = wintunDll.FindProc("WintunSendPacket"); err != nil {
-				return
-			}
-		}
-	})
+	var t = &Wintun{}
+
+	t.wintunDll, err = dll.LoadDLL(d)
 	if err != nil {
-		wintunDllLoadOnec = sync.Once{}
+		return nil, err
 	}
-	return err
+	defer func() {
+		if err != nil {
+			t.wintunDll.Release()
+		}
+	}()
+
+	if t.wintunCreateAdapter, err = t.wintunDll.FindProc("WintunCreateAdapter"); err != nil {
+		return nil, err
+	}
+	if t.wintunOpenAdapter, err = t.wintunDll.FindProc("WintunOpenAdapter"); err != nil {
+		return nil, err
+	}
+	if t.wintunCloseAdapter, err = t.wintunDll.FindProc("WintunCloseAdapter"); err != nil {
+		return nil, err
+	}
+	if t.wintunDeleteDriver, err = t.wintunDll.FindProc("WintunDeleteDriver"); err != nil {
+		return nil, err
+	}
+	if t.wintunGetAdapterLuid, err = t.wintunDll.FindProc("WintunGetAdapterLUID"); err != nil {
+		return nil, err
+	}
+	if t.wintunGetRunningDriverVersion, err = t.wintunDll.FindProc("WintunGetRunningDriverVersion"); err != nil {
+		return nil, err
+	}
+	if t.wintunSetLogger, err = t.wintunDll.FindProc("WintunSetLogger"); err != nil {
+		return nil, err
+	}
+	if t.wintunStartSession, err = t.wintunDll.FindProc("WintunStartSession"); err != nil {
+		return nil, err
+	}
+	if t.wintunEndSession, err = t.wintunDll.FindProc("WintunEndSession"); err != nil {
+		return nil, err
+	}
+	if t.wintunGetReadWaitEvent, err = t.wintunDll.FindProc("WintunGetReadWaitEvent"); err != nil {
+		return nil, err
+	}
+	if t.wintunReceivePacket, err = t.wintunDll.FindProc("WintunReceivePacket"); err != nil {
+		return nil, err
+	}
+	if t.wintunReleaseReceivePacket, err = t.wintunDll.FindProc("WintunReleaseReceivePacket"); err != nil {
+		return nil, err
+	}
+	if t.wintunAllocateSendPacket, err = t.wintunDll.FindProc("WintunAllocateSendPacket"); err != nil {
+		return nil, err
+	}
+	if t.wintunSendPacket, err = t.wintunDll.FindProc("WintunSendPacket"); err != nil {
+		return nil, err
+	}
+
+	return t, nil
 }

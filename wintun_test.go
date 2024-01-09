@@ -15,10 +15,11 @@ import (
 func TestWintun(t *testing.T) {
 
 	// err := dll.LoadDLL(dll.FileMode(`./embed/wintun_amd64.dll`))
-	err := wintun.LoadDLL(embed.Amd64)
+	tun, err := wintun.LoadWintun(embed.Amd64)
 	require.NoError(t, err)
+	defer tun.Close()
 
-	_, err = wintun.DriverVersion()
+	_, err = tun.DriverVersion()
 	require.Equal(t, syscall.ERROR_FILE_NOT_FOUND, err)
 
 	// guid := windows.GUID{
@@ -28,11 +29,11 @@ func TestWintun(t *testing.T) {
 	// 	Data4: [8]byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef},
 	// }
 
-	a, err := wintun.CreateAdapter("test", "example", nil)
+	a, err := tun.CreateAdapter("test", "example", nil)
 	require.NoError(t, err)
 	defer a.Close()
 
-	v, err := wintun.DriverVersion()
+	v, err := tun.DriverVersion()
 	require.NoError(t, err)
 	require.NotZero(t, v)
 

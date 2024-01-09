@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
-	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -15,9 +15,12 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-var (
-	wintunDllLoadOnec sync.Once
-	wintunDll         dll.DLL
+type Wintun struct {
+	wintunDll dll.DLL
+
+	// todo: use it
+	// todo: add ctx
+	closed atomic.Bool
 
 	wintunCreateAdapter           uintptr
 	wintunOpenAdapter             uintptr
@@ -33,11 +36,16 @@ var (
 	wintunReleaseReceivePacket    uintptr
 	wintunAllocateSendPacket      uintptr
 	wintunSendPacket              uintptr
-)
+}
+
+func (t *Wintun) Close() error {
+	// todo: add test
+	return t.wintunDll.Release()
+}
 
 // DriverVersion determines the version of the Wintun driver currently loaded.
-func DriverVersion() (version uint32, err error) {
-	r0, _, err := syscall.SyscallN(wintunGetRunningDriverVersion)
+func (t *Wintun) DriverVersion() (version uint32, err error) {
+	r0, _, err := syscall.SyscallN(t.wintunGetRunningDriverVersion)
 	if r0 == 0 {
 		return 0, err
 	}
@@ -45,7 +53,7 @@ func DriverVersion() (version uint32, err error) {
 }
 
 // CreateAdapter creates a new wintun adapter.
-func CreateAdapter(name, tunType string, guid *windows.GUID) (adapter *Adapter, err error) {
+func (t *Wintun) CreateAdapter(name, tunType string, guid *windows.GUID) (adapter *Adapter, err error) {
 	var name16 *uint16
 	name16, err = windows.UTF16PtrFromString(name)
 	if err != nil {
@@ -56,7 +64,7 @@ func CreateAdapter(name, tunType string, guid *windows.GUID) (adapter *Adapter, 
 	if err != nil {
 		return
 	}
-	r1, _, err := syscall.SyscallN(wintunCreateAdapter, uintptr(unsafe.Pointer(name16)), uintptr(unsafe.Pointer(tunnelType16)), uintptr(unsafe.Pointer(guid)))
+	r1, _, err := syscall.SyscallN(t.wintunCreateAdapter, uintptr(unsafe.Pointer(name16)), uintptr(unsafe.Pointer(tunnelType16)), uintptr(unsafe.Pointer(guid)))
 	if r1 == 0 {
 		return nil, err
 	}
@@ -64,13 +72,13 @@ func CreateAdapter(name, tunType string, guid *windows.GUID) (adapter *Adapter, 
 }
 
 // OpenAdapter opens an existing wintun adapter.
-func OpenAdapter(name string) (adapter *Adapter, err error) {
+func (t *Wintun) OpenAdapter(name string) (adapter *Adapter, err error) {
 	var name16 *uint16
 	name16, err = windows.UTF16PtrFromString(name)
 	if err != nil {
 		return
 	}
-	r1, _, err := syscall.SyscallN(wintunOpenAdapter, uintptr(unsafe.Pointer(name16)))
+	r1, _, err := syscall.SyscallN(t.wintunOpenAdapter, uintptr(unsafe.Pointer(name16)))
 	if r1 == 0 {
 		return nil, err
 	}
@@ -78,8 +86,8 @@ func OpenAdapter(name string) (adapter *Adapter, err error) {
 }
 
 // DeleteDriver deletes the Wintun driver if there are no more adapters in use.
-func DeleteDriver() error {
-	r1, _, err := syscall.SyscallN(wintunDeleteDriver)
+func (t *Wintun) DeleteDriver() error {
+	r1, _, err := syscall.SyscallN(t.wintunDeleteDriver)
 	if r1 == 0 {
 		return err
 	}
@@ -110,7 +118,7 @@ func Message(level loggerLevel, timestamp uint64, msg *uint16) uintptr {
 // SetLogger sets logger callback function.
 //
 //	logger may be called from various threads concurrently, set to nil to disable
-func SetLogger(logger LoggerCallback) error {
+func (t *Wintun) SetLogger(logger LoggerCallback) error {
 	var callback uintptr
 	if logger != nil {
 		switch runtime.GOARCH {
@@ -129,7 +137,7 @@ func SetLogger(logger LoggerCallback) error {
 		}
 	}
 
-	_, _, err := syscall.SyscallN(wintunSetLogger, callback)
+	_, _, err := syscall.SyscallN(t.wintunSetLogger, callback)
 	if err != syscall.Errno(0) {
 		return err
 	}
