@@ -19,20 +19,20 @@ var (
 	wintunDllLoadOnec sync.Once
 	wintunDll         dll.DLL
 
-	wintunCreateAdapter           uintptr //*windows.Proc
-	wintunOpenAdapter             uintptr //*windows.Proc
-	wintunCloseAdapter            uintptr //*windows.Proc
-	wintunDeleteDriver            uintptr //*windows.Proc
-	wintunGetAdapterLuid          uintptr //*windows.Proc
-	wintunGetRunningDriverVersion uintptr //*windows.Proc
-	wintunSetLogger               uintptr //*windows.Proc
-	wintunStartSession            uintptr //*windows.Proc
-	wintunEndSession              uintptr //*windows.Proc
-	wintunGetReadWaitEvent        uintptr //*windows.Proc
-	wintunReceivePacket           uintptr //*windows.Proc
-	wintunReleaseReceivePacket    uintptr //*windows.Proc
-	wintunAllocateSendPacket      uintptr //*windows.Proc
-	wintunSendPacket              uintptr //*windows.Proc
+	wintunCreateAdapter           uintptr
+	wintunOpenAdapter             uintptr
+	wintunCloseAdapter            uintptr
+	wintunDeleteDriver            uintptr
+	wintunGetAdapterLuid          uintptr
+	wintunGetRunningDriverVersion uintptr
+	wintunSetLogger               uintptr
+	wintunStartSession            uintptr
+	wintunEndSession              uintptr
+	wintunGetReadWaitEvent        uintptr
+	wintunReceivePacket           uintptr
+	wintunReleaseReceivePacket    uintptr
+	wintunAllocateSendPacket      uintptr
+	wintunSendPacket              uintptr
 )
 
 // DriverVersion determines the version of the Wintun driver currently loaded.
@@ -89,9 +89,9 @@ func DeleteDriver() error {
 type loggerLevel int
 
 const (
-	logInfo loggerLevel = iota
-	logWarn
-	logErr
+	LogInfo loggerLevel = iota
+	LogWarn
+	LogErr
 )
 
 type LoggerCallback func(level loggerLevel, timestamp uint64, msg *uint16) uintptr
