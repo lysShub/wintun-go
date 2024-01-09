@@ -1,4 +1,7 @@
-package dll
+//go:build windows
+// +build windows
+
+package wintun
 
 import (
 	"fmt"
@@ -8,34 +11,35 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/lysShub/go-dll"
 	"golang.org/x/sys/windows"
 )
 
 var (
 	wintunDllLoadOnec sync.Once
-	wintunDll         DLL
+	wintunDll         dll.DLL
 
-	wintunCreateAdapter           *windows.Proc
-	wintunOpenAdapter             *windows.Proc
-	wintunCloseAdapter            *windows.Proc
-	wintunDeleteDriver            *windows.Proc
-	wintunGetAdapterLuid          *windows.Proc
-	wintunGetRunningDriverVersion *windows.Proc
-	wintunSetLogger               *windows.Proc
-	wintunStartSession            *windows.Proc
-	wintunEndSession              *windows.Proc
-	wintunGetReadWaitEvent        *windows.Proc
-	wintunReceivePacket           *windows.Proc
-	wintunReleaseReceivePacket    *windows.Proc
-	wintunAllocateSendPacket      *windows.Proc
-	wintunSendPacket              *windows.Proc
+	wintunCreateAdapter           uintptr //*windows.Proc
+	wintunOpenAdapter             uintptr //*windows.Proc
+	wintunCloseAdapter            uintptr //*windows.Proc
+	wintunDeleteDriver            uintptr //*windows.Proc
+	wintunGetAdapterLuid          uintptr //*windows.Proc
+	wintunGetRunningDriverVersion uintptr //*windows.Proc
+	wintunSetLogger               uintptr //*windows.Proc
+	wintunStartSession            uintptr //*windows.Proc
+	wintunEndSession              uintptr //*windows.Proc
+	wintunGetReadWaitEvent        uintptr //*windows.Proc
+	wintunReceivePacket           uintptr //*windows.Proc
+	wintunReleaseReceivePacket    uintptr //*windows.Proc
+	wintunAllocateSendPacket      uintptr //*windows.Proc
+	wintunSendPacket              uintptr //*windows.Proc
 )
 
 // DriverVersion determines the version of the Wintun driver currently loaded.
 func DriverVersion() (version uint32, err error) {
-	r0, _, _ := syscall.SyscallN(wintunGetRunningDriverVersion.Addr())
+	r0, _, err := syscall.SyscallN(wintunGetRunningDriverVersion)
 	if r0 == 0 {
-		return 0, windows.GetLastError()
+		return 0, err
 	}
 	return uint32(r0), nil
 }
@@ -52,11 +56,11 @@ func CreateAdapter(name, tunType string, guid *windows.GUID) (adapter *Adapter, 
 	if err != nil {
 		return
 	}
-	r0, _, _ := syscall.SyscallN(wintunCreateAdapter.Addr(), uintptr(unsafe.Pointer(name16)), uintptr(unsafe.Pointer(tunnelType16)), uintptr(unsafe.Pointer(guid)))
-	if r0 == 0 {
-		return nil, windows.GetLastError()
+	r1, _, err := syscall.SyscallN(wintunCreateAdapter, uintptr(unsafe.Pointer(name16)), uintptr(unsafe.Pointer(tunnelType16)), uintptr(unsafe.Pointer(guid)))
+	if r1 == 0 {
+		return nil, err
 	}
-	return &Adapter{handle: r0}, nil
+	return &Adapter{handle: r1}, nil
 }
 
 // OpenAdapter opens an existing wintun adapter.
@@ -66,18 +70,18 @@ func OpenAdapter(name string) (adapter *Adapter, err error) {
 	if err != nil {
 		return
 	}
-	r0, _, _ := syscall.SyscallN(wintunOpenAdapter.Addr(), uintptr(unsafe.Pointer(name16)))
-	if r0 == 0 {
-		return nil, windows.GetLastError()
+	r1, _, err := syscall.SyscallN(wintunOpenAdapter, uintptr(unsafe.Pointer(name16)))
+	if r1 == 0 {
+		return nil, err
 	}
-	return &Adapter{handle: r0}, nil
+	return &Adapter{handle: r1}, nil
 }
 
 // DeleteDriver deletes the Wintun driver if there are no more adapters in use.
 func DeleteDriver() error {
-	r1, _, _ := syscall.SyscallN(wintunDeleteDriver.Addr())
+	r1, _, err := syscall.SyscallN(wintunDeleteDriver)
 	if r1 == 0 {
-		return windows.GetLastError()
+		return err
 	}
 	return nil
 }
@@ -125,6 +129,9 @@ func SetLogger(logger LoggerCallback) error {
 		}
 	}
 
-	syscall.SyscallN(wintunSetLogger.Addr(), callback)
+	_, _, err := syscall.SyscallN(wintunSetLogger, callback)
+	if err != syscall.Errno(0) {
+		return err
+	}
 	return nil
 }

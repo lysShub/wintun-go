@@ -1,4 +1,7 @@
-package dll
+//go:build windows
+// +build windows
+
+package wintun
 
 const (
 
