@@ -5,6 +5,8 @@ package wintun
 
 import (
 	"fmt"
+	"net"
+	"net/netip"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
@@ -63,6 +65,39 @@ func (a *Adapter) InterfaceIndex() (int, error) {
 		return -1, err
 	}
 	return int(idx), nil
+}
+
+func (a *Adapter) Addresses() ([]netip.Prefix, error) {
+	nicid, err := a.InterfaceIndex()
+	if err != nil {
+		return nil, err
+	}
+
+	i, err := net.InterfaceByIndex(nicid)
+	if err != nil {
+		return nil, err
+	}
+
+	addrs, err := i.Addrs()
+	if err != nil {
+		return nil, err
+	}
+	var ips []netip.Prefix
+	for _, a := range addrs {
+		if in, ok := a.(*net.IPNet); ok {
+			addr, ok := netip.AddrFromSlice(in.IP)
+			if !ok {
+				continue
+			} else if addr.Is4In6() {
+				addr = netip.AddrFrom4(addr.As4())
+			}
+
+			ones, _ := in.Mask.Size()
+			ips = append(ips, netip.PrefixFrom(addr, ones))
+		}
+	}
+
+	return ips, nil
 }
 
 type Session struct {
