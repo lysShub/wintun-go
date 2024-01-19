@@ -48,7 +48,7 @@ func TestWintun(t *testing.T) {
 		fmt.Println(addrs[0].String())
 	}
 
-	s, err := a.StartSession(wintun.WINTUN_MIN_RING_CAPACITY)
+	s, err := a.StartSession(wintun.MinRingCapacity)
 	require.NoError(t, err)
 	defer s.Close()
 
@@ -70,7 +70,7 @@ func TestWintun(t *testing.T) {
 	for {
 		p, err := s.ReceivePacket()
 		require.NoError(t, err)
-		s.Release(p)
+		s.ReleasePacket(p)
 	}
 
 }
