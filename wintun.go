@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"runtime"
-	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -18,9 +17,7 @@ import (
 type Wintun struct {
 	wintunDll dll.DLL
 
-	// todo: use it
 	// todo: add ctx
-	closed atomic.Bool
 
 	wintunCreateAdapter           uintptr
 	wintunOpenAdapter             uintptr
@@ -82,7 +79,10 @@ func (t *Wintun) OpenAdapter(name string) (adapter *Adapter, err error) {
 	if r1 == 0 {
 		return nil, err
 	}
-	return &Adapter{handle: r1}, nil
+	return &Adapter{
+		wintun: t,
+		handle: r1,
+	}, nil
 }
 
 // DeleteDriver deletes the Wintun driver if there are no more adapters in use.

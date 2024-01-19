@@ -14,8 +14,7 @@ import (
 
 func TestWintun(t *testing.T) {
 
-	// err := dll.LoadDLL(dll.FileMode(`./embed/wintun_amd64.dll`))
-	tun, err := wintun.LoadWintun(embed.Amd64)
+	tun, err := wintun.LoadWintun(embed.DLL)
 	require.NoError(t, err)
 	defer tun.Close()
 
