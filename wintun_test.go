@@ -10,13 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lysShub/go-wintun"
-	"github.com/lysShub/go-wintun/embed"
+	"github.com/lysShub/wintun-go"
 	"github.com/stretchr/testify/require"
 )
 
 func Test_Adapter_InterfaceIndex(t *testing.T) {
-	tun, err := wintun.LoadWintun(embed.DLL)
+	tun, err := wintun.LoadWintun(wintun.DLL)
 	require.NoError(t, err)
 	defer tun.Close()
 
@@ -43,7 +42,7 @@ func Test_Adapter_InterfaceIndex(t *testing.T) {
 
 func Test_Aapter_Address(t *testing.T) {
 
-	tun, err := wintun.LoadWintun(embed.DLL)
+	tun, err := wintun.LoadWintun(wintun.DLL)
 	require.NoError(t, err)
 	defer tun.Close()
 
@@ -64,7 +63,7 @@ func Test_Aapter_Address(t *testing.T) {
 
 func TestWintun(t *testing.T) {
 
-	tun, err := wintun.LoadWintun(embed.DLL)
+	tun, err := wintun.LoadWintun(wintun.DLL)
 	require.NoError(t, err)
 	defer tun.Close()
 

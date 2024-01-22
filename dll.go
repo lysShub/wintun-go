@@ -4,7 +4,7 @@
 package wintun
 
 import (
-	"github.com/lysShub/go-dll"
+	"github.com/lysShub/dll-go"
 )
 
 func LoadWintun[T string | dll.MemDLL](d T) (tun *Wintun, err error) {
