@@ -21,7 +21,7 @@ func Test_Adapter_InterfaceIndex(t *testing.T) {
 
 	name := "testadapterinterfaceindex"
 
-	a, err := tun.CreateAdapter(name, "", nil)
+	a, err := tun.CreateAdapter(name)
 	require.NoError(t, err)
 	defer a.Close()
 
@@ -48,13 +48,10 @@ func Test_Aapter_Address(t *testing.T) {
 
 	name := "testadapteraddress"
 
-	a, err := tun.CreateAdapter(name, "", nil)
+	a, err := tun.CreateAdapter(name)
 	require.NoError(t, err)
 	defer a.Close()
 
-	se, err := a.StartSession(wintun.MinRingCapacity)
-	require.NoError(t, err)
-	defer se.Close()
 	time.Sleep(time.Second * 10) // wait DHCP
 
 	_, err = a.Addresses()
@@ -77,7 +74,7 @@ func TestWintun(t *testing.T) {
 	// 	Data4: [8]byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef},
 	// }
 
-	a, err := tun.CreateAdapter("test", "example", nil)
+	a, err := tun.CreateAdapter("test", wintun.TunType("example"))
 	require.NoError(t, err)
 	defer a.Close()
 
@@ -97,10 +94,6 @@ func TestWintun(t *testing.T) {
 		fmt.Println(addrs[0].String())
 	}
 
-	s, err := a.StartSession(wintun.MinRingCapacity)
-	require.NoError(t, err)
-	defer s.Close()
-
 	{
 		time.Sleep(time.Second * 20) // wait DHCP allocates IP addresses
 
@@ -117,9 +110,9 @@ func TestWintun(t *testing.T) {
 	}
 
 	for {
-		p, err := s.ReceivePacket()
+		p, err := a.ReceivePacket()
 		require.NoError(t, err)
-		s.ReleasePacket(p)
+		a.ReleasePacket(p)
 	}
 
 }

@@ -51,36 +51,76 @@ func (t *Wintun) DriverVersion() (version uint32, err error) {
 	return uint32(r0), nil
 }
 
+type options struct {
+	tunType string
+	guid    *windows.GUID
+	ringCap int
+}
+
+type Option func(*options)
+
+func TunType(typ string) Option {
+	return func(o *options) {
+		o.tunType = typ
+	}
+}
+
+func Guid(guid *windows.GUID) Option {
+	return func(o *options) {
+		o.guid = guid
+	}
+}
+
+// RingBuff ring capacity: rings capacity, must be between MIN_RING_CAPACITY and MAX_RING_CAPACITY,
+// must be a power of two.
+func RingBuff(size int) Option {
+	return func(o *options) {
+		o.ringCap = size
+	}
+}
+
 // CreateAdapter creates a new wintun adapter.
-func (t *Wintun) CreateAdapter(name, tunType string, guid *windows.GUID) (adapter *Adapter, err error) {
-	var name16 *uint16
-	name16, err = windows.UTF16PtrFromString(name)
+func (t *Wintun) CreateAdapter(name string, opts ...Option) (*Adapter, error) {
+	name16, err := windows.UTF16PtrFromString(name)
 	if err != nil {
-		return
+		return nil, err
 	}
-	var tunnelType16 *uint16
-	tunnelType16, err = windows.UTF16PtrFromString(tunType)
+
+	var o = &options{
+		ringCap: MinRingCapacity,
+	}
+	for _, fn := range opts {
+		fn(o)
+	}
+
+	tunnelType16, err := windows.UTF16PtrFromString(o.tunType)
 	if err != nil {
-		return
+		return nil, err
 	}
-	r1, _, err := syscall.SyscallN(t.wintunCreateAdapter, uintptr(unsafe.Pointer(name16)), uintptr(unsafe.Pointer(tunnelType16)), uintptr(unsafe.Pointer(guid)))
+	r1, _, err := syscall.SyscallN(
+		t.wintunCreateAdapter,
+		uintptr(unsafe.Pointer(name16)),
+		uintptr(unsafe.Pointer(tunnelType16)),
+		uintptr(unsafe.Pointer(o.guid)),
+	)
 	if r1 == 0 {
 		return nil, err
 	}
 
 	t.refs.Add(1)
-	return &Adapter{
+	var a = &Adapter{
 		wintun: t,
 		handle: r1,
-	}, nil
+	}
+	return a, a.init(uint32(o.ringCap))
 }
 
 // OpenAdapter opens an existing wintun adapter.
-func (t *Wintun) OpenAdapter(name string) (adapter *Adapter, err error) {
+func (t *Wintun) OpenAdapter(name string) (*Adapter, error) {
 	var name16 *uint16
-	name16, err = windows.UTF16PtrFromString(name)
+	name16, err := windows.UTF16PtrFromString(name)
 	if err != nil {
-		return
+		return nil, err
 	}
 	r1, _, err := syscall.SyscallN(t.wintunOpenAdapter, uintptr(unsafe.Pointer(name16)))
 	if r1 == 0 {
@@ -88,10 +128,11 @@ func (t *Wintun) OpenAdapter(name string) (adapter *Adapter, err error) {
 	}
 
 	t.refs.Add(1)
-	return &Adapter{
+	var a = &Adapter{
 		wintun: t,
 		handle: r1,
-	}, nil
+	}
+	return a, a.init(MinRingCapacity)
 }
 
 // DeleteDriver deletes the Wintun driver if there are no more adapters in use.
