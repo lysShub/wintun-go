@@ -55,13 +55,7 @@ func (a *Adapter) GetAdapterLuid() (winipcfg.LUID, error) {
 	return winipcfg.LUID(luid), nil
 }
 
-var (
-	modiphlpapi                     = windows.NewLazySystemDLL("iphlpapi.dll")
-	procConvertInterfaceLuidToIndex = modiphlpapi.NewProc("ConvertInterfaceLuidToIndex")
-)
-
 func (a *Adapter) InterfaceIndex() (int, error) {
-
 	luid, err := a.GetAdapterLuid()
 	if err != nil {
 		return -1, err
