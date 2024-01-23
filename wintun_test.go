@@ -25,7 +25,7 @@ func Test_Adapter_InterfaceIndex(t *testing.T) {
 	require.NoError(t, err)
 	defer a.Close()
 
-	nicid, err := a.InterfaceIndex()
+	ifIdx, err := a.InterfaceIndex()
 	require.NoError(t, err)
 
 	b, err := exec.Command("netsh", "int", "ipv4", "show", "interfaces").CombinedOutput()
@@ -33,29 +33,11 @@ func Test_Adapter_InterfaceIndex(t *testing.T) {
 
 	for _, line := range strings.Split(string(b), "\n") {
 		if strings.Contains(line, name) {
-			require.True(t, strings.Contains(line, strconv.Itoa(nicid)))
+			require.True(t, strings.Contains(line, strconv.Itoa(ifIdx)))
 			return
 		}
 	}
 	t.Errorf("can't found nic: \n %s", string(b))
-}
-
-func Test_Aapter_Address(t *testing.T) {
-
-	tun, err := wintun.LoadWintun(wintun.DLL)
-	require.NoError(t, err)
-	defer tun.Close()
-
-	name := "testadapteraddress"
-
-	a, err := tun.CreateAdapter(name)
-	require.NoError(t, err)
-	defer a.Close()
-
-	time.Sleep(time.Second * 10) // wait DHCP
-
-	_, err = a.Addresses()
-	require.NoError(t, err)
 }
 
 func TestWintun(t *testing.T) {

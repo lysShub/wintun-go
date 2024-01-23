@@ -5,12 +5,11 @@ package wintun
 
 import (
 	"fmt"
-	"net"
-	"net/netip"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.zx2c4.com/wireguard/windows/tunnel/winipcfg"
 )
 
 type Adapter struct {
@@ -47,13 +46,13 @@ func (a *Adapter) Close() error {
 }
 
 // GetAdapterLuid returns the LUID of the adapter.
-func (a *Adapter) GetAdapterLuid() (uint64, error) {
+func (a *Adapter) GetAdapterLuid() (winipcfg.LUID, error) {
 	var luid uint64
 	_, _, err := syscall.SyscallN(a.wintun.wintunGetAdapterLuid, a.handle, uintptr(unsafe.Pointer(&luid)))
 	if err != syscall.Errno(0) {
 		return 0, err
 	}
-	return luid, nil
+	return winipcfg.LUID(luid), nil
 }
 
 var (
@@ -62,54 +61,17 @@ var (
 )
 
 func (a *Adapter) InterfaceIndex() (int, error) {
+
 	luid, err := a.GetAdapterLuid()
 	if err != nil {
 		return -1, err
 	}
 
-	var idx uint32
-	_, _, err = syscall.SyscallN(
-		procConvertInterfaceLuidToIndex.Addr(),
-		uintptr(unsafe.Pointer(&luid)),
-		uintptr(unsafe.Pointer(&idx)),
-	)
-	if err != syscall.Errno(0) {
+	row, err := luid.Interface()
+	if err != nil {
 		return -1, err
 	}
-	return int(idx), nil
-}
-
-func (a *Adapter) Addresses() ([]netip.Prefix, error) {
-	nicid, err := a.InterfaceIndex()
-	if err != nil {
-		return nil, err
-	}
-
-	i, err := net.InterfaceByIndex(nicid)
-	if err != nil {
-		return nil, err
-	}
-
-	addrs, err := i.Addrs()
-	if err != nil {
-		return nil, err
-	}
-	var ips []netip.Prefix
-	for _, a := range addrs {
-		if in, ok := a.(*net.IPNet); ok {
-			addr, ok := netip.AddrFromSlice(in.IP)
-			if !ok {
-				continue
-			} else if addr.Is4In6() {
-				addr = netip.AddrFrom4(addr.As4())
-			}
-
-			ones, _ := in.Mask.Size()
-			ips = append(ips, netip.PrefixFrom(addr, ones))
-		}
-	}
-
-	return ips, nil
+	return int(row.InterfaceIndex), nil
 }
 
 func (s *Adapter) getReadWaitEvent() (windows.Handle, error) {
