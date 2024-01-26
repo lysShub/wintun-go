@@ -79,7 +79,7 @@ func (s *Adapter) getReadWaitEvent() (windows.Handle, error) {
 
 type Packet []byte
 
-// ReceivePacket Retrieves one or packet. After the packet content is consumed,
+// ReceivePacket receives one outbound packet. After the packet content is consumed,
 // call Release with Packet returned from this function to release internal buffer.
 // This function is thread-safe.
 //
@@ -93,7 +93,7 @@ func (a *Adapter) ReceivePacket() (rp Packet, err error) {
 		r0, _, err := syscall.SyscallN(a.wintun.wintunReceivePacket, uintptr(a.session), (uintptr)(unsafe.Pointer(&size)))
 		if r0 == 0 {
 			if err == windows.ERROR_NO_MORE_ITEMS {
-				hdl, err := a.getReadWaitEvent()
+				hdl, err := a.getReadWaitEvent() // todo: store this handle?
 				if err != nil {
 					return nil, err
 				}
@@ -129,7 +129,7 @@ func (a *Adapter) AllocateSendPacket(packetSize uint32) (Packet, error) {
 	return unsafe.Slice(p, packetSize), nil
 }
 
-// SendPacket sends the packet and releases internal buffer.
+// SendPacket sends one inbound packet and releases internal buffer.
 // is thread-safe, but the AllocateSendPacket order of calls define
 // the packet sending order. this means the packet is not guaranteed to be sent in the SendPacket yet.
 func (a *Adapter) SendPacket(p Packet) error {
