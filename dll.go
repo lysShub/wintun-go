@@ -7,6 +7,14 @@ import (
 	"github.com/lysShub/dll-go"
 )
 
+func MustLoadWintun[T string | dll.MemDLL](d T) *Wintun {
+	w, err := LoadWintun(d)
+	if err != nil {
+		panic(err)
+	}
+	return w
+}
+
 func LoadWintun[T string | dll.MemDLL](d T) (*Wintun, error) {
 	var tun = &Wintun{}
 	var err error
