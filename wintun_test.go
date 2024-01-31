@@ -13,6 +13,7 @@ import (
 
 	"github.com/lysShub/wintun-go"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/windows"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/checksum"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -28,13 +29,13 @@ func randPort() int {
 }
 
 func Test_Adapter_InterfaceIndex(t *testing.T) {
-	tun, err := wintun.LoadWintun(wintun.DLL)
+	err := wintun.Load(wintun.DLL)
 	require.NoError(t, err)
-	defer tun.Close()
+	defer wintun.Release()
 
 	name := "testadapterinterfaceindex"
 
-	a, err := tun.CreateAdapter(name)
+	a, err := wintun.CreateAdapter(name)
 	require.NoError(t, err)
 	defer a.Close()
 
@@ -54,35 +55,43 @@ func Test_Adapter_InterfaceIndex(t *testing.T) {
 }
 
 func Test_Wintun_Close(t *testing.T) {
-	tun, err := wintun.LoadWintun(wintun.DLL)
+	err := wintun.Load(wintun.DLL)
 	require.NoError(t, err)
-	defer tun.Close()
+	defer wintun.Release()
 
-	ap, err := tun.CreateAdapter("test")
+	ap, err := wintun.CreateAdapter("test")
 	require.NoError(t, err)
 
 	go func() {
 		for {
 			p, err := ap.ReceivePacket()
-			require.NoError(t, err)
+			require.Contains(t, []error{nil, windows.ERROR_INVALID_HANDLE}, err)
+			if err != nil {
+				return
+			}
 			err = ap.ReleasePacket(p)
-			require.NoError(t, err)
+			require.Contains(t, []error{nil, windows.ERROR_INVALID_HANDLE}, err)
+			if err != nil {
+				return
+			}
 		}
 	}()
-	time.Sleep(time.Second)
 
-	defer ap.Close()
+	time.Sleep(time.Second)
+	ap.Close()
+	time.Sleep(time.Second)
 }
 
 func Test_Example(t *testing.T) {
 	// https://github.com/WireGuard/wintun/blob/master/example/example.c
 
-	tun, err := wintun.LoadWintun(wintun.DLL)
+	err := wintun.Load(wintun.DLL)
 	require.NoError(t, err)
-	defer tun.Close()
+	defer wintun.Release()
 
-	ap, err := tun.CreateAdapter("example1")
+	ap, err := wintun.CreateAdapter("testexample")
 	require.NoError(t, err)
+	defer ap.Close()
 
 	luid, err := ap.GetAdapterLuid()
 	require.NoError(t, err)
@@ -91,42 +100,13 @@ func Test_Example(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// ReceivePackets
-	go func() {
-		for {
-			p, err := ap.ReceivePacket()
-			require.NoError(t, err)
-
-			var str string
-			switch header.IPVersion(p) {
-			case 4:
-				iphdr := header.IPv4(p)
-
-				if iphdr.TransportProtocol() == header.ICMPv4ProtocolNumber {
-					str = fmt.Sprintf(
-						"Received IPv%d proto 0x%x packet from %s to %s",
-						4, iphdr.TransportProtocol(), iphdr.SourceAddress(), iphdr.DestinationAddress(),
-					)
-				}
-			default:
-			}
-
-			if len(str) > 0 {
-				fmt.Println(str)
-				// fmt.Println(hex.Dump(p))
-			}
-
-			ap.ReleasePacket(p)
-		}
-	}()
-
-	// SendPackets
+	// Send  ping -S 10.6.7.8 10.6.7.7
 	go func() {
 		for {
 			p, err := ap.AllocateSendPacket(28)
 			require.NoError(t, err)
 
-			{ // buildICMP
+			{ // build ICMP Echo
 				iphdr := header.IPv4(p)
 				iphdr.Encode(&header.IPv4Fields{
 					TOS:            0,
@@ -151,12 +131,36 @@ func Test_Example(t *testing.T) {
 			err = ap.SendPacket(p)
 			require.NoError(t, err)
 
-			// fmt.Println(hex.Dump(p))
 			time.Sleep(time.Second)
 		}
 	}()
 
-	time.Sleep(time.Second * 10)
+	for { // Receive outboud ICMP Echo-Reply packet
+		p, err := ap.ReceivePacket()
+		require.NoError(t, err)
+
+		var str string
+		switch header.IPVersion(p) {
+		case 4:
+			iphdr := header.IPv4(p)
+			if iphdr.TransportProtocol() == header.ICMPv4ProtocolNumber {
+				icmphdr := header.ICMPv4(iphdr.Payload())
+
+				str = fmt.Sprintf(
+					"Received IPv%d proto 0x%x packet from %s to %s, icmp type %d",
+					4, iphdr.TransportProtocol(), iphdr.SourceAddress(), iphdr.DestinationAddress(), icmphdr.Type(),
+				)
+			}
+		default:
+		}
+		ap.ReleasePacket(p)
+
+		if len(str) > 0 {
+			t.Log(str)
+			return
+		}
+	}
+
 }
 
 func Test_Wintun_Recv(t *testing.T) {
@@ -168,11 +172,11 @@ func Test_Wintun_Recv(t *testing.T) {
 			raddr = &net.UDPAddr{IP: []byte{10, 1, 1, 13}, Port: randPort()}
 		)
 
-		tun, err := wintun.LoadWintun(wintun.DLL)
+		err := wintun.Load(wintun.DLL)
 		require.NoError(t, err)
-		defer tun.Close()
+		defer wintun.Release()
 
-		ap, err := tun.CreateAdapter("recvoutboundudp")
+		ap, err := wintun.CreateAdapter("recvoutboundudp")
 		require.NoError(t, err)
 		defer ap.Close()
 

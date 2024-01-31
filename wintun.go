@@ -4,52 +4,11 @@
 package wintun
 
 import (
-	"fmt"
-	"sync/atomic"
-	"syscall"
 	"unsafe"
 
 	"github.com/lysShub/dll-go"
 	"golang.org/x/sys/windows"
 )
-
-// todo: add ctx
-type Wintun struct {
-	wintunDll dll.DLL
-	refs      atomic.Int32
-
-	wintunCreateAdapter           uintptr
-	wintunOpenAdapter             uintptr
-	wintunCloseAdapter            uintptr
-	wintunDeleteDriver            uintptr
-	wintunGetAdapterLuid          uintptr
-	wintunGetRunningDriverVersion uintptr
-	wintunSetLogger               uintptr
-	wintunStartSession            uintptr
-	wintunEndSession              uintptr
-	wintunGetReadWaitEvent        uintptr
-	wintunReceivePacket           uintptr
-	wintunReleaseReceivePacket    uintptr
-	wintunAllocateSendPacket      uintptr
-	wintunSendPacket              uintptr
-}
-
-func (t *Wintun) Close() error {
-	if t.refs.Load() > 0 {
-		return fmt.Errorf("can't close wintun used by %d adapters", t.refs.Load())
-	}
-
-	return t.wintunDll.Release()
-}
-
-// DriverVersion determines the version of the Wintun driver currently loaded.
-func (t *Wintun) DriverVersion() (version uint32, err error) {
-	r0, _, err := syscall.SyscallN(t.wintunGetRunningDriverVersion)
-	if r0 == 0 {
-		return 0, err
-	}
-	return uint32(r0), nil
-}
 
 type options struct {
 	tunType string
@@ -80,7 +39,7 @@ func RingBuff(size int) Option {
 }
 
 // CreateAdapter creates a new wintun adapter.
-func (t *Wintun) CreateAdapter(name string, opts ...Option) (*Adapter, error) {
+func CreateAdapter(name string, opts ...Option) (*Adapter, error) {
 	name16, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		return nil, err
@@ -97,53 +56,83 @@ func (t *Wintun) CreateAdapter(name string, opts ...Option) (*Adapter, error) {
 	if err != nil {
 		return nil, err
 	}
-	r1, _, err := syscall.SyscallN(
-		t.wintunCreateAdapter,
+
+	wintun.RLock()
+	r1, _, err := syscallN(
+		wintun.wintunCreateAdapter,
 		uintptr(unsafe.Pointer(name16)),
 		uintptr(unsafe.Pointer(tunnelType16)),
 		uintptr(unsafe.Pointer(o.guid)),
 	)
+	wintun.RUnlock()
 	if r1 == 0 {
 		return nil, err
 	}
 
-	t.refs.Add(1)
+	wintun.refs.Add(1)
 	var a = &Adapter{
-		wintun: t,
 		handle: r1,
 	}
 	return a, a.init(uint32(o.ringCap))
 }
 
 // OpenAdapter opens an existing wintun adapter.
-func (t *Wintun) OpenAdapter(name string) (*Adapter, error) {
+func OpenAdapter(name string) (*Adapter, error) {
 	var name16 *uint16
 	name16, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		return nil, err
 	}
-	r1, _, err := syscall.SyscallN(t.wintunOpenAdapter, uintptr(unsafe.Pointer(name16)))
+
+	wintun.RLock()
+	r1, _, err := syscallN(wintun.wintunOpenAdapter, uintptr(unsafe.Pointer(name16)))
 	if r1 == 0 {
 		return nil, err
 	}
+	wintun.RUnlock()
 
-	t.refs.Add(1)
+	wintun.refs.Add(1)
 	var a = &Adapter{
-		wintun: t,
 		handle: r1,
 	}
 	return a, a.init(MinRingCapacity)
 }
 
-// DeleteDriver deletes the Wintun driver if there are no more adapters in use.
-func (t *Wintun) DeleteDriver() error {
-	if err := t.Close(); err != nil {
-		return err
-	}
+// init starts Wintun session.
+func (a *Adapter) init(capacity uint32) error {
+	var err error
 
-	r1, _, err := syscall.SyscallN(t.wintunDeleteDriver)
-	if r1 == 0 {
+	wintun.RLock()
+	a.session, _, err = syscallN(wintun.wintunStartSession, a.handle, uintptr(capacity))
+	wintun.RUnlock()
+	if a.session == 0 {
 		return err
 	}
 	return nil
+}
+
+// DriverVersion determines the version of the Wintun driver currently loaded.
+func DriverVersion() (version uint32, err error) {
+	wintun.RLock()
+	r0, _, err := syscallN(wintun.wintunGetRunningDriverVersion)
+	wintun.RUnlock()
+	if r0 == 0 {
+		return 0, err
+	}
+	return uint32(r0), nil
+}
+
+// DeleteDriver deletes the Wintun driver if there are no more adapters in use.
+func DeleteDriver() error {
+	if wintun.refs.Load() > 0 {
+		return dll.ERR_RELEASE_DLL_IN_USE
+	}
+
+	wintun.RLock()
+	r1, _, err := syscallN(wintun.wintunDeleteDriver)
+	wintun.RUnlock()
+	if r1 == 0 {
+		return err
+	}
+	return Release()
 }

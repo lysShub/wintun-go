@@ -13,42 +13,37 @@ import (
 )
 
 type Adapter struct {
-	wintun *Wintun
-
 	handle  uintptr
 	session uintptr
 }
 
-// init starts Wintun session.
-func (a *Adapter) init(capacity uint32) error {
-	var err error
-	a.session, _, err = syscall.SyscallN(a.wintun.wintunStartSession, a.handle, uintptr(capacity))
-	if a.session == 0 {
-		return err
-	}
-	return nil
-}
-
 // Close releases Wintun adapter resources and, if adapter was created with CreateAdapter, removes adapter.
 func (a *Adapter) Close() error {
-	_, _, err := syscall.SyscallN(a.wintun.wintunEndSession, uintptr(a.session))
+	wintun.Lock()
+	defer wintun.Unlock()
+
+	_, _, err := syscallN(wintun.wintunEndSession, uintptr(a.session))
 	if err != syscall.Errno(0) {
 		return err
 	}
 
-	_, _, err = syscall.SyscallN(a.wintun.wintunCloseAdapter, a.handle)
+	_, _, err = syscallN(wintun.wintunCloseAdapter, a.handle)
 	if err != syscall.Errno(0) {
 		return err
 	}
 
-	a.wintun.refs.Add(-1)
+	a.session = 0
+	a.handle = 0
+	wintun.refs.Add(-1)
 	return nil
 }
 
 // GetAdapterLuid returns the LUID of the adapter.
 func (a *Adapter) GetAdapterLuid() (winipcfg.LUID, error) {
 	var luid uint64
-	_, _, err := syscall.SyscallN(a.wintun.wintunGetAdapterLuid, a.handle, uintptr(unsafe.Pointer(&luid)))
+	wintun.RLock()
+	_, _, err := syscallN(wintun.wintunGetAdapterLuid, a.handle, uintptr(unsafe.Pointer(&luid)))
+	wintun.RUnlock()
 	if err != syscall.Errno(0) {
 		return 0, err
 	}
@@ -69,7 +64,9 @@ func (a *Adapter) InterfaceIndex() (int, error) {
 }
 
 func (s *Adapter) getReadWaitEvent() (windows.Handle, error) {
-	r0, _, err := syscall.SyscallN(s.wintun.wintunGetReadWaitEvent, uintptr(s.session))
+	wintun.RLock()
+	r0, _, err := syscallN(wintun.wintunGetReadWaitEvent, uintptr(s.session))
+	wintun.RUnlock()
 	if err != syscall.Errno(0) {
 		return windows.InvalidHandle, err
 	}
@@ -90,7 +87,14 @@ type Packet []byte
 func (a *Adapter) ReceivePacket() (rp Packet, err error) {
 	var size uint32
 	for {
-		r0, _, err := syscall.SyscallN(a.wintun.wintunReceivePacket, uintptr(a.session), (uintptr)(unsafe.Pointer(&size)))
+
+		wintun.RLock()
+		r0, _, err := syscallN(
+			wintun.wintunReceivePacket,
+			a.session,
+			(uintptr)(unsafe.Pointer(&size)),
+		)
+		wintun.RUnlock()
 		if r0 == 0 {
 			if err == windows.ERROR_NO_MORE_ITEMS {
 				hdl, err := a.getReadWaitEvent() // todo: store this handle?
@@ -120,7 +124,9 @@ func (a *Adapter) ReceivePacket() (rp Packet, err error) {
 //	 *         ERROR_HANDLE_EOF       Wintun adapter is terminating;
 //	 *         ERROR_BUFFER_OVERFLOW  Wintun buffer is full;
 func (a *Adapter) AllocateSendPacket(packetSize uint32) (Packet, error) {
-	r0, _, err := syscall.SyscallN(a.wintun.wintunAllocateSendPacket, uintptr(a.session), uintptr(packetSize))
+	wintun.RLock()
+	r0, _, err := syscallN(wintun.wintunAllocateSendPacket, uintptr(a.session), uintptr(packetSize))
+	wintun.RUnlock()
 	if r0 == 0 {
 		return nil, err
 	}
@@ -133,11 +139,13 @@ func (a *Adapter) AllocateSendPacket(packetSize uint32) (Packet, error) {
 // is thread-safe, but the AllocateSendPacket order of calls define
 // the packet sending order. this means the packet is not guaranteed to be sent in the SendPacket yet.
 func (a *Adapter) SendPacket(p Packet) error {
-	_, _, err := syscall.SyscallN(
-		a.wintun.wintunSendPacket,
+	wintun.RLock()
+	_, _, err := syscallN(
+		wintun.wintunSendPacket,
 		uintptr(a.session),
 		uintptr(unsafe.Pointer(&p[0])),
 	)
+	wintun.RUnlock()
 	if err != syscall.Errno(0) {
 		return err
 	}
@@ -147,11 +155,13 @@ func (a *Adapter) SendPacket(p Packet) error {
 // ReleasePacket releases internal buffer after the received packet has been processed by the client.
 // this function is thread-safe.
 func (a Adapter) ReleasePacket(p Packet) error {
-	_, _, err := syscall.SyscallN(
-		a.wintun.wintunReleaseReceivePacket,
+	wintun.RLock()
+	_, _, err := syscallN(
+		wintun.wintunReleaseReceivePacket,
 		uintptr(a.session),
 		uintptr(unsafe.Pointer(&p[0])),
 	)
+	wintun.RUnlock()
 	if err != syscall.Errno(0) {
 		return err
 	}

@@ -2,7 +2,7 @@ module github.com/lysShub/wintun-go
 
 go 1.21
 
-require github.com/lysShub/dll-go v0.0.0-20240122093239-9b8c1c27c681
+require github.com/lysShub/dll-go v0.0.0-20240131092034-3f09ae5eff72
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect

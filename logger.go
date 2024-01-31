@@ -33,7 +33,7 @@ func Message(level loggerLevel, timestamp uint64, msg *uint16) uintptr {
 // SetLogger sets logger callback function.
 //
 //	logger may be called from various threads concurrently, set to nil to disable
-func (t *Wintun) SetLogger(logger LoggerCallback) error {
+func SetLogger(logger LoggerCallback) error {
 	var callback uintptr
 	if logger != nil {
 		switch runtime.GOARCH {
@@ -52,7 +52,9 @@ func (t *Wintun) SetLogger(logger LoggerCallback) error {
 		}
 	}
 
-	_, _, err := syscall.SyscallN(t.wintunSetLogger, callback)
+	wintun.RLock()
+	_, _, err := syscallN(wintun.wintunSetLogger, callback)
+	wintun.RUnlock()
 	if err != syscall.Errno(0) {
 		return err
 	}
