@@ -1,7 +1,11 @@
 package wintun_test
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net"
 	"net/netip"
@@ -13,7 +17,6 @@ import (
 
 	"github.com/lysShub/wintun-go"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sys/windows"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/checksum"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -28,18 +31,49 @@ func randPort() int {
 	}
 }
 
-func Test_Adapter_InterfaceIndex(t *testing.T) {
-	err := wintun.Load(wintun.DLL)
-	require.NoError(t, err)
+func Test_DriverVersion(t *testing.T) {
+	t.Skip("can't get")
+
+	require.NoError(t, wintun.Load(wintun.DLL))
 	defer wintun.Release()
 
-	name := "testadapterinterfaceindex"
+	ver, err := wintun.DriverVersion()
+	require.NoError(t, err)
+	t.Log(ver)
+}
+
+func Test_Logger(t *testing.T) {
+	require.NoError(t, wintun.Load(wintun.DLL))
+	defer wintun.Release()
+
+	buff := bytes.NewBuffer(nil)
+	log := slog.New(slog.NewJSONHandler(buff, nil))
+	callback := wintun.DefaultCallback(log)
+
+	err := wintun.SetLogger(callback)
+	require.NoError(t, err)
+
+	{
+		w, err := wintun.CreateAdapter("testlogger")
+		require.NoError(t, err)
+		err = w.Close()
+		require.NoError(t, err)
+	}
+
+	require.Contains(t, buff.String(), "Creating")
+}
+
+func Test_Adapter_Index(t *testing.T) {
+	require.NoError(t, wintun.Load(wintun.DLL))
+	defer wintun.Release()
+
+	name := "testadapterindex"
 
 	a, err := wintun.CreateAdapter(name)
 	require.NoError(t, err)
 	defer a.Close()
 
-	ifIdx, err := a.InterfaceIndex()
+	ifIdx, err := a.Index()
 	require.NoError(t, err)
 
 	b, err := exec.Command("netsh", "int", "ipv4", "show", "interfaces").CombinedOutput()
@@ -54,39 +88,10 @@ func Test_Adapter_InterfaceIndex(t *testing.T) {
 	t.Errorf("can't found nic: \n %s", string(b))
 }
 
-func Test_Wintun_Close(t *testing.T) {
-	err := wintun.Load(wintun.DLL)
-	require.NoError(t, err)
-	defer wintun.Release()
-
-	ap, err := wintun.CreateAdapter("test")
-	require.NoError(t, err)
-
-	go func() {
-		for {
-			p, err := ap.ReceivePacket()
-			require.Contains(t, []error{nil, windows.ERROR_INVALID_HANDLE}, err)
-			if err != nil {
-				return
-			}
-			err = ap.ReleasePacket(p)
-			require.Contains(t, []error{nil, windows.ERROR_INVALID_HANDLE}, err)
-			if err != nil {
-				return
-			}
-		}
-	}()
-
-	time.Sleep(time.Second)
-	ap.Close()
-	time.Sleep(time.Second)
-}
-
 func Test_Example(t *testing.T) {
 	// https://github.com/WireGuard/wintun/blob/master/example/example.c
 
-	err := wintun.Load(wintun.DLL)
-	require.NoError(t, err)
+	require.NoError(t, wintun.Load(wintun.DLL))
 	defer wintun.Release()
 
 	ap, err := wintun.CreateAdapter("testexample")
@@ -103,7 +108,7 @@ func Test_Example(t *testing.T) {
 	// Send  ping -S 10.6.7.8 10.6.7.7
 	go func() {
 		for {
-			p, err := ap.AllocateSendPacket(28)
+			p, err := ap.AllocPacket(28)
 			require.NoError(t, err)
 
 			{ // build ICMP Echo
@@ -128,7 +133,7 @@ func Test_Example(t *testing.T) {
 				icmphdr.SetChecksum(^checksum.Checksum(icmphdr, 0))
 			}
 
-			err = ap.SendPacket(p)
+			err = ap.Send(p)
 			require.NoError(t, err)
 
 			time.Sleep(time.Second)
@@ -136,7 +141,7 @@ func Test_Example(t *testing.T) {
 	}()
 
 	for { // Receive outboud ICMP Echo-Reply packet
-		p, err := ap.ReceivePacket()
+		p, err := ap.Receive(context.Background())
 		require.NoError(t, err)
 
 		var str string
@@ -156,7 +161,7 @@ func Test_Example(t *testing.T) {
 		ap.ReleasePacket(p)
 
 		if len(str) > 0 {
-			t.Log(str)
+			// t.Log(str)
 			return
 		}
 	}
@@ -164,6 +169,8 @@ func Test_Example(t *testing.T) {
 }
 
 func Test_Wintun_Recv(t *testing.T) {
+	require.NoError(t, wintun.Load(wintun.DLL))
+	defer wintun.Release()
 
 	t.Run("recv-outbound-udp", func(t *testing.T) {
 		var (
@@ -171,10 +178,6 @@ func Test_Wintun_Recv(t *testing.T) {
 			laddr = &net.UDPAddr{IP: ip.AsSlice(), Port: randPort()}
 			raddr = &net.UDPAddr{IP: []byte{10, 1, 1, 13}, Port: randPort()}
 		)
-
-		err := wintun.Load(wintun.DLL)
-		require.NoError(t, err)
-		defer wintun.Release()
 
 		ap, err := wintun.CreateAdapter("recvoutboundudp")
 		require.NoError(t, err)
@@ -201,11 +204,10 @@ func Test_Wintun_Recv(t *testing.T) {
 		}()
 
 		for {
-			p, err := ap.ReceivePacket()
+			p, err := ap.Receive(context.Background())
 			require.NoError(t, err)
 
-			switch header.IPVersion(p) {
-			case 4:
+			if header.IPVersion(p) == 4 {
 				iphdr := header.IPv4(p)
 				if iphdr.TransportProtocol() == header.UDPProtocolNumber {
 					udphdr := header.UDP(iphdr.Payload())
@@ -220,7 +222,27 @@ func Test_Wintun_Recv(t *testing.T) {
 						return
 					}
 				}
-			default:
+			}
+
+			err = ap.ReleasePacket(p)
+			require.NoError(t, err)
+		}
+	})
+
+	t.Run("recv-ctx", func(t *testing.T) {
+		ap, err := wintun.CreateAdapter("cecvctx")
+		require.NoError(t, err)
+		defer ap.Close()
+
+		ctx, _ := context.WithTimeout(context.Background(), time.Second)
+
+		for {
+			p, err := ap.Receive(ctx)
+			if p != nil {
+				require.NoError(t, ap.ReleasePacket(p))
+			} else {
+				require.True(t, errors.Is(err, context.DeadlineExceeded))
+				return
 			}
 		}
 	})

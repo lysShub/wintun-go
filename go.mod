@@ -2,11 +2,8 @@ module github.com/lysShub/wintun-go
 
 go 1.21
 
-require github.com/lysShub/dll-go v0.0.0-20240131092034-3f09ae5eff72
-
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/ebitengine/purego v0.5.1 // indirect
 	github.com/google/btree v1.1.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
@@ -14,6 +11,7 @@ require (
 )
 
 require (
+	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.8.4
 	golang.org/x/sys v0.16.0
 	golang.zx2c4.com/wireguard/windows v0.5.3

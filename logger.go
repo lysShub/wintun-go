@@ -1,62 +1,67 @@
 package wintun
 
 import (
-	"fmt"
-	"log"
+	"context"
+	"log/slog"
 	"runtime"
-	"syscall"
 
+	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
 )
 
-type loggerLevel int
+type LoggerLevel int
 
 const (
-	LogInfo loggerLevel = iota
-	LogWarn
-	LogErr
+	Info LoggerLevel = iota
+	Warn
+	Error
 )
 
-type LoggerCallback func(level loggerLevel, timestamp uint64, msg *uint16) uintptr
+type LoggerCallback func(level LoggerLevel, timestamp uint64, msg *uint16) uintptr
 
-func Message(level loggerLevel, timestamp uint64, msg *uint16) uintptr {
-	if tw, ok := log.Default().Writer().(interface {
-		WriteWithTimestamp(p []byte, ts int64) (n int, err error)
-	}); ok {
-		tw.WriteWithTimestamp([]byte(log.Default().Prefix()+windows.UTF16PtrToString(msg)), (int64(timestamp)-116444736000000000)*100)
-	} else {
-		log.Println(windows.UTF16PtrToString(msg))
+func DefaultCallback(log *slog.Logger) LoggerCallback {
+	return func(level LoggerLevel, timestamp uint64, msg *uint16) uintptr {
+		var sl slog.Level
+		switch level {
+		case Info:
+			sl = slog.LevelInfo
+		case Warn:
+			sl = slog.LevelWarn
+		case Error:
+			sl = slog.LevelError
+		default:
+			sl = slog.LevelDebug
+		}
+		log.LogAttrs(
+			context.Background(), sl,
+			windows.UTF16PtrToString(msg),
+		)
+		return 0
 	}
-	return 0
 }
 
-// SetLogger sets logger callback function.
-//
-//	logger may be called from various threads concurrently, set to nil to disable
 func SetLogger(logger LoggerCallback) error {
 	var callback uintptr
 	if logger != nil {
 		switch runtime.GOARCH {
 		case "386":
-			callback = windows.NewCallback(func(level loggerLevel, timestampLow, timestampHigh uint32, msg *uint16) {
+			callback = windows.NewCallback(func(level LoggerLevel, timestampLow, timestampHigh uint32, msg *uint16) {
 				logger(level, uint64(timestampHigh)<<32|uint64(timestampLow), msg)
 			})
 		case "arm":
-			callback = windows.NewCallback(func(level loggerLevel, _, timestampLow, timestampHigh uint32, msg *uint16) {
+			callback = windows.NewCallback(func(level LoggerLevel, _, timestampLow, timestampHigh uint32, msg *uint16) {
 				logger(level, uint64(timestampHigh)<<32|uint64(timestampLow), msg)
 			})
 		case "amd64", "arm64":
 			callback = windows.NewCallback(logger)
 		default:
-			return fmt.Errorf("not support windows arch %s", runtime.GOARCH)
+			return errors.Errorf("not support windows arch %s", runtime.GOARCH)
 		}
 	}
 
-	wintun.RLock()
-	_, _, err := syscallN(wintun.wintunSetLogger, callback)
-	wintun.RUnlock()
-	if err != syscall.Errno(0) {
-		return err
+	_, _, err := global.calln(global.procSetLogger, callback)
+	if err != windows.ERROR_SUCCESS {
+		return errors.WithStack(err)
 	}
 	return nil
 }
