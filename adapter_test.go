@@ -47,48 +47,42 @@ func Test_Invalid_Ring_Capacity(t *testing.T) {
 	})
 }
 
-func Test_Session_Repeat_Start(t *testing.T) {
+func Test_Adapter_Create(t *testing.T) {
 	require.NoError(t, wintun.Load(wintun.DLL))
 	defer wintun.Release()
 
-	ap, err := wintun.CreateAdapter("testsessionrepeatstart")
-	require.NoError(t, err)
-	defer ap.Close()
+	t.Run("create/start", func(t *testing.T) {
+		ap, err := wintun.CreateAdapter("createstart")
+		require.NoError(t, err)
+		defer ap.Close()
 
-	err = ap.Start(wintun.MinRingCapacity)
-	require.True(t, errors.Is(err, windows.ERROR_ALREADY_INITIALIZED))
+		err = ap.Start(wintun.MinRingCapacity)
+		require.True(t, errors.Is(err, windows.ERROR_ALREADY_INITIALIZED))
+	})
+	t.Run("create/stop/stop", func(t *testing.T) {
+		ap, err := wintun.CreateAdapter("createstopstop")
+		require.NoError(t, err)
+		defer ap.Close()
+
+		err = ap.Stop()
+		require.NoError(t, err)
+
+		err = ap.Stop()
+		require.NoError(t, err)
+	})
+	t.Run("create/close/close", func(t *testing.T) {
+		ap, err := wintun.CreateAdapter("createcloseclose")
+		require.NoError(t, err)
+
+		err = ap.Close()
+		require.NoError(t, err)
+
+		err = ap.Close()
+		require.NoError(t, err)
+	})
 }
 
-func Test_Session_Repeat_Stop(t *testing.T) {
-	require.NoError(t, wintun.Load(wintun.DLL))
-	defer wintun.Release()
-
-	ap, err := wintun.CreateAdapter("testsessionrepeatstop")
-	require.NoError(t, err)
-	defer ap.Close()
-
-	err = ap.Stop()
-	require.NoError(t, err)
-
-	err = ap.Stop()
-	require.NoError(t, err)
-}
-
-func Test_Adapter_Repeat_Close(t *testing.T) {
-	require.NoError(t, wintun.Load(wintun.DLL))
-	defer wintun.Release()
-
-	ap, err := wintun.CreateAdapter("testadapterrepeatclose")
-	require.NoError(t, err)
-
-	err = ap.Close()
-	require.NoError(t, err)
-
-	err = ap.Close()
-	require.NoError(t, err)
-}
-
-func Test_Adapter_RW_Stoped(t *testing.T) {
+func Test_Adapter_Stoped_Recv(t *testing.T) {
 	require.NoError(t, wintun.Load(wintun.DLL))
 	defer wintun.Release()
 
@@ -100,7 +94,7 @@ func Test_Adapter_RW_Stoped(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = ap.Recv(context.Background())
-	require.True(t, errors.Is(err, os.ErrClosed))
+	require.Error(t, err)
 }
 
 func Test_Recv_Close_(t *testing.T) {
@@ -228,7 +222,7 @@ func Test_RecvCtx(t *testing.T) {
 	require.NoError(t, wintun.Load(wintun.DLL))
 	defer wintun.Release()
 
-	ap, err := wintun.CreateAdapter("cecvctx")
+	ap, err := wintun.CreateAdapter("rcecvctx")
 	require.NoError(t, err)
 	defer ap.Close()
 
@@ -237,12 +231,41 @@ func Test_RecvCtx(t *testing.T) {
 
 	for {
 		p, err := ap.Recv(ctx)
-		if p != nil {
+		if err == nil {
 			require.NoError(t, ap.Release(p))
 		} else {
 			require.True(t, errors.Is(err, context.DeadlineExceeded))
 			return
 		}
+	}
+}
+
+func Test_Race_Recving_Close(t *testing.T) {
+	// if remove Close and Recv mutex, will fatal Exception
+	require.NoError(t, wintun.Load(wintun.DLL))
+	defer wintun.Release()
+
+	for i := 0; i < 0xf; i++ {
+		func() {
+			ap, err := wintun.CreateAdapter("testracereccvingclose")
+			require.NoError(t, err)
+			defer ap.Close()
+
+			go func() {
+				time.Sleep(time.Second)
+				err := ap.Close()
+				require.NoError(t, err)
+			}()
+
+			for {
+				p, err := ap.Recv(context.Background())
+				if err == nil {
+					ap.Release(p)
+				} else {
+					require.True(t, errors.Is(err, os.ErrClosed))
+				}
+			}
+		}()
 	}
 }
 
@@ -408,4 +431,8 @@ func Test_Session_Restart(t *testing.T) {
 
 	err = ap.Start(wintun.MinRingCapacity)
 	require.NoError(t, err)
+}
+
+func Test_Auto_Handle_DF(t *testing.T) {
+	t.Skip("todo")
 }

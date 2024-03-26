@@ -44,10 +44,10 @@ func (a *Adapter) Start(capacity uint32) (err error) {
 func (a *Adapter) Stop() error {
 	a.Lock()
 	defer a.Unlock()
-	return a.stopUnlocked()
+	return a.stopLocked()
 }
 
-func (a *Adapter) stopUnlocked() error {
+func (a *Adapter) stopLocked() error {
 	if a.session > 0 {
 		_, _, err := global.calln(global.procEndSession, uintptr(a.session))
 		if err != nil {
@@ -63,7 +63,7 @@ func (a *Adapter) Close() error {
 	defer a.Unlock()
 
 	if a.handle > 0 {
-		err := a.stopUnlocked()
+		err := a.stopLocked()
 		if err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func (a *Adapter) Recv(ctx context.Context) (ip rpack, err error) {
 		)
 		if r0 == 0 {
 			if errors.Is(err, windows.ERROR_NO_MORE_ITEMS) {
-				hdl, err := a.getReadWaitEvent() // todo: store this handle?
+				hdl, err := a.getReadWaitEvent()
 				if err != nil {
 					return nil, errors.WithStack(err)
 				}
