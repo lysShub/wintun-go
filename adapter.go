@@ -5,6 +5,7 @@ package wintun
 
 import (
 	"context"
+	"sync"
 
 	"github.com/pkg/errors"
 
@@ -15,52 +16,80 @@ import (
 )
 
 type Adapter struct {
+	sync.RWMutex
+
 	handle  uintptr
 	session uintptr
 }
 
 func (a *Adapter) Start(capacity uint32) (err error) {
-	a.session, _, err = global.calln(
+	if capacity < MinRingCapacity || MaxRingCapacity < capacity {
+		return errors.New("invalid ring buff capacity")
+	}
+	a.Lock()
+	defer a.Unlock()
+
+	fd, _, err := global.calln(
 		global.procStartSession,
 		a.handle,
 		uintptr(capacity),
 	)
-	if a.session == 0 {
-		return errors.WithStack(err)
+	if err != nil {
+		return err
 	}
+	a.session = fd
 	return nil
 }
 
 func (a *Adapter) Stop() error {
-	_, _, err := global.calln(global.procEndSession, uintptr(a.session))
-	if err != windows.ERROR_SUCCESS {
-		return errors.WithStack(err)
+	a.Lock()
+	defer a.Unlock()
+	return a.stopUnlocked()
+}
+
+func (a *Adapter) stopUnlocked() error {
+	if a.session > 0 {
+		_, _, err := global.calln(global.procEndSession, uintptr(a.session))
+		if err != nil {
+			return err
+		}
+		a.session = 0
 	}
 	return nil
 }
 
-func (a *Adapter) Close() (err error) {
-	err = a.Stop()
-	if err != nil {
-		return errors.WithStack(err)
-	}
+func (a *Adapter) Close() error {
+	a.Lock()
+	defer a.Unlock()
 
-	_, _, err = global.calln(global.procCloseAdapter, a.handle)
-	if err != windows.ERROR_SUCCESS {
-		return err
+	if a.handle > 0 {
+		err := a.stopUnlocked()
+		if err != nil {
+			return err
+		}
+
+		_, _, err = global.calln(global.procCloseAdapter, a.handle)
+		if err != nil {
+			return err
+		}
+
+		a.handle = 0
 	}
 	return nil
 }
 
 func (a *Adapter) GetAdapterLuid() (winipcfg.LUID, error) {
+	a.RLock()
+	defer a.RUnlock()
+
 	var luid uint64
 	_, _, err := global.calln(
 		global.procGetAdapterLuid,
 		a.handle,
 		uintptr(unsafe.Pointer(&luid)),
 	)
-	if err != windows.ERROR_SUCCESS {
-		return 0, errors.WithStack(err)
+	if err != nil {
+		return 0, err
 	}
 	return winipcfg.LUID(luid), nil
 }
@@ -68,12 +97,12 @@ func (a *Adapter) GetAdapterLuid() (winipcfg.LUID, error) {
 func (a *Adapter) Index() (int, error) {
 	luid, err := a.GetAdapterLuid()
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, err
 	}
 
 	row, err := luid.Interface()
 	if err != nil {
-		return 0, errors.WithStack(err)
+		return 0, err
 	}
 	return int(row.InterfaceIndex), nil
 }
@@ -81,14 +110,18 @@ func (a *Adapter) Index() (int, error) {
 func (s *Adapter) getReadWaitEvent() (windows.Handle, error) {
 	r0, _, err := global.calln(global.procGetReadWaitEvent, uintptr(s.session))
 	if r0 == 0 {
-		return 0, errors.WithStack(err)
+		return 0, err
 	}
 	return windows.Handle(r0), nil
 }
 
-type Packet []byte
+type rpack []byte
 
-func (a *Adapter) Receive(ctx context.Context) (rp Packet, err error) {
+// Recv receive outbound(income adapter) ip packet, after must call ap.Release(p)
+func (a *Adapter) Recv(ctx context.Context) (ip rpack, err error) {
+	a.RLock()
+	defer a.RUnlock()
+
 	var size uint32
 	for {
 		r0, _, err := global.calln(
@@ -128,40 +161,55 @@ func (a *Adapter) Receive(ctx context.Context) (rp Packet, err error) {
 	}
 }
 
-func (a *Adapter) AllocPacket(packetSize uint32) (Packet, error) {
+func (a *Adapter) Release(p rpack) error {
+	if p == nil {
+		return nil
+	}
+	a.RLock()
+	defer a.RUnlock()
+
+	_, _, err := global.calln(
+		global.procReleaseReceivePacket,
+		uintptr(a.session),
+		uintptr(unsafe.Pointer(&p[0])),
+	)
+	return err
+}
+
+type spack []byte
+
+func (a *Adapter) Alloc(size int) (spack, error) {
+	if size == 0 {
+		return nil, errors.New("require greater than 0")
+	}
+	a.RLock()
+	defer a.RUnlock()
+
 	r0, _, err := global.calln(
 		global.procAllocateSendPacket,
 		uintptr(a.session),
-		uintptr(packetSize),
+		uintptr(size),
 	)
 	if r0 == 0 {
 		return nil, err
 	}
 
 	p := (*byte)(unsafe.Add(*new(unsafe.Pointer), r0))
-	return unsafe.Slice(p, packetSize), nil
+	return unsafe.Slice(p, size), nil
 }
 
-func (a *Adapter) Send(p Packet) error {
+// Send send inbound(outgoing adapter) ip packet, ip must alloc by AllocPacket
+func (a *Adapter) Send(ip spack) error {
+	if len(ip) == 0 {
+		return nil
+	}
+	a.RLock()
+	defer a.RUnlock()
+
 	_, _, err := global.calln(
 		global.procSendPacket,
 		uintptr(a.session),
-		uintptr(unsafe.Pointer(&p[0])),
+		uintptr(unsafe.Pointer(&ip[0])),
 	)
-	if err != windows.ERROR_SUCCESS {
-		return errors.WithStack(err)
-	}
-	return nil
-}
-
-func (a Adapter) ReleasePacket(p Packet) error {
-	_, _, err := global.calln(
-		global.procReleaseReceivePacket,
-		uintptr(a.session),
-		uintptr(unsafe.Pointer(&p[0])),
-	)
-	if err != windows.ERROR_SUCCESS {
-		return errors.WithStack(err)
-	}
-	return nil
+	return err
 }

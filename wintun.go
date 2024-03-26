@@ -15,7 +15,7 @@ import (
 
 var global = wintun{}
 
-func MustLoad[T string | MemMode](p T) struct{} {
+func MustLoad[T string | Mem](p T) struct{} {
 	err := Load(p)
 	if err != nil {
 		panic(err)
@@ -23,11 +23,11 @@ func MustLoad[T string | MemMode](p T) struct{} {
 	return struct{}{}
 }
 
-func Load[T string | MemMode](p T) error {
+func Load[T string | Mem](p T) error {
 	global.Lock()
 	defer global.Unlock()
 	if global.dll != nil {
-		return errors.WithStack(ErrLoaded{})
+		return ErrLoaded{}
 	}
 
 	var err error
@@ -37,8 +37,8 @@ func Load[T string | MemMode](p T) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
-	case MemMode:
-		global.dll, err = loadMemDLL(DLL)
+	case Mem:
+		global.dll, err = loadMemDLL(p)
 		if err != nil {
 			return errors.WithStack(err)
 		}
@@ -52,8 +52,12 @@ func Load[T string | MemMode](p T) error {
 
 type ErrLoaded struct{}
 
-func (e ErrLoaded) Error() string {
+func (ErrLoaded) Error() string {
 	return "wintun loaded"
+}
+
+func (ErrLoaded) Temporary() bool {
+	return true
 }
 
 func Release() error {
@@ -141,20 +145,32 @@ ret:
 }
 
 func (w *wintun) calln(trap uintptr, args ...uintptr) (r1, r2 uintptr, err error) {
+	// in wintun, all call without zero parameter
+	for _, e := range args {
+		if e == 0 {
+			return 0, 0, errors.WithMessagef(errors.WithStack(os.ErrClosed), "%v", args)
+		}
+	}
 	w.RLock()
 	defer w.RUnlock()
 
 	if w.dll == nil {
-		return 0, 0, os.ErrClosed
+		return 0, 0, errors.WithStack(os.ErrClosed)
 	}
 
 	var e syscall.Errno
 	r1, r2, e = syscall.SyscallN(trap, args...)
-
-	return r1, r2, e
+	if e == windows.ERROR_SUCCESS {
+		return r1, r2, nil
+	}
+	return r1, r2, errors.WithStack(e)
 }
 
 func CreateAdapter(name string, opts ...Option) (*Adapter, error) {
+	if len(name) == 0 {
+		return nil, errors.New("require adapter name")
+	}
+
 	var o = defaultOptions()
 	for _, fn := range opts {
 		fn(o)
@@ -169,20 +185,33 @@ func CreateAdapter(name string, opts ...Option) (*Adapter, error) {
 		return nil, errors.WithStack(err)
 	}
 
-	r1, _, err := global.calln(
-		global.procCreateAdapter,
-		uintptr(unsafe.Pointer(name16)),
-		uintptr(unsafe.Pointer(tunnelType16)),
-		uintptr(unsafe.Pointer(o.guid)),
-	)
-	if r1 == 0 {
+	var r1 uintptr
+	if o.guid == nil {
+		r1, _, err = global.calln(
+			global.procCreateAdapter,
+			uintptr(unsafe.Pointer(name16)),
+			uintptr(unsafe.Pointer(tunnelType16)),
+		)
+	} else {
+		r1, _, err = global.calln(
+			global.procCreateAdapter,
+			uintptr(unsafe.Pointer(name16)),
+			uintptr(unsafe.Pointer(tunnelType16)),
+			uintptr(unsafe.Pointer(o.guid)),
+		)
+	}
+	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 	ap := &Adapter{handle: r1}
-	return ap, ap.Start(uint32(o.ringCap))
+	return ap, ap.Start(o.ringBuff)
 }
 
 func OpenAdapter(name string) (*Adapter, error) {
+	if len(name) == 0 {
+		return nil, errors.New("require adapter name")
+	}
+
 	var name16 *uint16
 	name16, err := windows.UTF16PtrFromString(name)
 	if err != nil {
@@ -190,24 +219,24 @@ func OpenAdapter(name string) (*Adapter, error) {
 	}
 
 	r1, _, err := global.calln(global.procOpenAdapter, uintptr(unsafe.Pointer(name16)))
-	if r1 == 0 {
+	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 	ap := &Adapter{handle: r1}
-	return ap, ap.Start(uint32(MinRingCapacity))
+	return ap, ap.Start(MinRingCapacity)
 }
 
 func DriverVersion() (version uint32, err error) {
 	r0, _, err := global.calln(global.procGetRunningDriverVersion)
-	if r0 == 0 {
+	if err != nil {
 		return 0, errors.WithStack(err)
 	}
 	return uint32(r0), nil
 }
 
 func DeleteDriver() error {
-	r1, _, err := global.calln(global.procDeleteDriver)
-	if r1 == 0 {
+	_, _, err := global.calln(global.procDeleteDriver)
+	if err != nil {
 		return errors.WithStack(err)
 	}
 	return nil

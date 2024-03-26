@@ -3,14 +3,14 @@ package wintun
 import "golang.org/x/sys/windows"
 
 type options struct {
-	tunType string
-	guid    *windows.GUID
-	ringCap int
+	tunType  string
+	guid     *windows.GUID
+	ringBuff uint32
 }
 
 func defaultOptions() *options {
 	return &options{
-		ringCap: MinRingCapacity,
+		ringBuff: MinRingCapacity,
 	}
 }
 
@@ -28,8 +28,8 @@ func Guid(guid *windows.GUID) Option {
 	}
 }
 
-func RingBuff(size int) Option {
+func RingBuff(size uint32) Option {
 	return func(o *options) {
-		o.ringCap = size
+		o.ringBuff = size
 	}
 }

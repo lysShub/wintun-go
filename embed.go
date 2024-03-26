@@ -1,3 +1,3 @@
 package wintun
 
-type MemMode []byte
+type Mem []byte

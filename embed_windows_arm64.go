@@ -5,4 +5,4 @@ import (
 )
 
 //go:embed embed/wintun_arm64.dll
-var DLL MemMode
+var DLL Mem
