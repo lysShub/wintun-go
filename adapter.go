@@ -22,6 +22,23 @@ type Adapter struct {
 	session uintptr
 }
 
+type ErrAdapterClosed struct{}
+
+func (ErrAdapterClosed) Error() string { return "adapter closed" }
+
+type ErrAdapterStoped struct{}
+
+func (ErrAdapterStoped) Error() string { return "adapter stoped" }
+
+func (a *Adapter) sessionLocked(trap uintptr, args ...uintptr) (r1, r2 uintptr, err error) {
+	if a.handle == 0 {
+		return 0, 0, errors.WithStack(ErrAdapterClosed{})
+	} else if a.session == 0 {
+		return 0, 0, errors.WithStack(ErrAdapterStoped{})
+	}
+	return global.calln(trap, append([]uintptr{a.session}, args...)...)
+}
+
 func (a *Adapter) Start(capacity uint32) (err error) {
 	if capacity < MinRingCapacity || MaxRingCapacity < capacity {
 		return errors.New("invalid ring buff capacity")
@@ -29,6 +46,9 @@ func (a *Adapter) Start(capacity uint32) (err error) {
 	a.Lock()
 	defer a.Unlock()
 
+	if a.handle == 0 {
+		return errors.WithStack(ErrAdapterClosed{})
+	}
 	fd, _, err := global.calln(
 		global.procStartSession,
 		a.handle,
@@ -72,7 +92,6 @@ func (a *Adapter) Close() error {
 		if err != nil {
 			return err
 		}
-
 		a.handle = 0
 	}
 	return nil
@@ -82,6 +101,9 @@ func (a *Adapter) GetAdapterLuid() (winipcfg.LUID, error) {
 	a.RLock()
 	defer a.RUnlock()
 
+	if a.handle == 0 {
+		return 0, errors.WithStack(ErrAdapterClosed{})
+	}
 	var luid uint64
 	_, _, err := global.calln(
 		global.procGetAdapterLuid,
@@ -107,8 +129,8 @@ func (a *Adapter) Index() (int, error) {
 	return int(row.InterfaceIndex), nil
 }
 
-func (s *Adapter) getReadWaitEvent() (windows.Handle, error) {
-	r0, _, err := global.calln(global.procGetReadWaitEvent, uintptr(s.session))
+func (a *Adapter) getReadWaitEvent() (windows.Handle, error) {
+	r0, _, err := a.sessionLocked(global.procGetReadWaitEvent)
 	if r0 == 0 {
 		return 0, err
 	}
@@ -124,9 +146,8 @@ func (a *Adapter) Recv(ctx context.Context) (ip rpack, err error) {
 
 	var size uint32
 	for {
-		r0, _, err := global.calln(
+		r0, _, err := a.sessionLocked(
 			global.procReceivePacket,
-			a.session,
 			(uintptr)(unsafe.Pointer(&size)),
 		)
 		if r0 == 0 {
@@ -162,15 +183,14 @@ func (a *Adapter) Recv(ctx context.Context) (ip rpack, err error) {
 }
 
 func (a *Adapter) Release(p rpack) error {
-	if p == nil {
+	if len(p) == 0 {
 		return nil
 	}
 	a.RLock()
 	defer a.RUnlock()
 
-	_, _, err := global.calln(
+	_, _, err := a.sessionLocked(
 		global.procReleaseReceivePacket,
-		uintptr(a.session),
 		uintptr(unsafe.Pointer(&p[0])),
 	)
 	return err
@@ -180,14 +200,13 @@ type spack []byte
 
 func (a *Adapter) Alloc(size int) (spack, error) {
 	if size == 0 {
-		return nil, errors.New("require greater than 0")
+		return spack{}, nil
 	}
 	a.RLock()
 	defer a.RUnlock()
 
-	r0, _, err := global.calln(
+	r0, _, err := a.sessionLocked(
 		global.procAllocateSendPacket,
-		uintptr(a.session),
 		uintptr(size),
 	)
 	if r0 == 0 {
@@ -206,9 +225,8 @@ func (a *Adapter) Send(ip spack) error {
 	a.RLock()
 	defer a.RUnlock()
 
-	_, _, err := global.calln(
+	_, _, err := a.sessionLocked(
 		global.procSendPacket,
-		uintptr(a.session),
 		uintptr(unsafe.Pointer(&ip[0])),
 	)
 	return err

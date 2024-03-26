@@ -95,7 +95,11 @@ func Test_Example(t *testing.T) {
 	require.NoError(t, err)
 
 	// Send: ping -S 10.6.7.8 10.6.7.7
+	var ch = make(chan struct{})
+	defer func() { <-ch }()
 	go func() {
+		defer close(ch)
+
 		pack := buildICMP(t,
 			addr.Addr().Next().AsSlice(),
 			addr.Addr().AsSlice(),
@@ -103,7 +107,7 @@ func Test_Example(t *testing.T) {
 		)
 		for {
 			p, err := ap.Alloc(len(pack))
-			if errors.Is(err, os.ErrClosed) {
+			if errors.Is(err, wintun.ErrAdapterClosed{}) {
 				return
 			}
 			require.NoError(t, err)
@@ -144,6 +148,7 @@ func Test_Example(t *testing.T) {
 		err = ap.Release(p)
 		require.NoError(t, err)
 	}
+	require.NoError(t, ap.Close())
 }
 
 func Test_DriverVersion(t *testing.T) {
@@ -258,7 +263,7 @@ func Test_Load(t *testing.T) {
 		defer wintun.Release()
 
 		err := wintun.Load(wintun.DLL)
-		require.True(t, errors.Is(err, wintun.ErrLoaded{}))
+		require.True(t, errors.Is(err, wintun.ErrWintunLoaded{}))
 		require.True(t,
 			err.(interface{ Temporary() bool }).Temporary(),
 		)
@@ -283,7 +288,7 @@ func Test_Load(t *testing.T) {
 func Test_Open(t *testing.T) {
 	t.Run("notload/open", func(t *testing.T) {
 		ap, err := wintun.OpenAdapter("xxx")
-		require.True(t, errors.Is(err, os.ErrClosed))
+		require.True(t, errors.Is(err, wintun.ErrWintunNotLoad{}))
 		require.Nil(t, ap)
 	})
 }

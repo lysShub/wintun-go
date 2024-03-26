@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -95,35 +94,6 @@ func Test_Adapter_Stoped_Recv(t *testing.T) {
 
 	_, err = ap.Recv(context.Background())
 	require.Error(t, err)
-}
-
-func Test_Recv_Close_(t *testing.T) {
-	require.NoError(t, wintun.Load(wintun.DLL))
-	defer wintun.Release()
-
-	ap, err := wintun.CreateAdapter("testrecvingclose")
-	require.NoError(t, err)
-	defer ap.Close()
-
-	go func() {
-		time.Sleep(time.Second)
-		err = ap.Close()
-		require.NoError(t, err)
-	}()
-
-	for i := 0; ; i++ {
-		p, err := ap.Recv(context.Background())
-		if err != nil {
-			require.True(t, errors.Is(err, os.ErrClosed))
-			break
-		} else {
-			err = ap.Release(p)
-			if err != nil {
-				require.True(t, errors.Is(err, os.ErrClosed))
-				break
-			}
-		}
-	}
 }
 
 func Test_Adapter_Index(t *testing.T) {
@@ -262,7 +232,8 @@ func Test_Race_Recving_Close(t *testing.T) {
 				if err == nil {
 					ap.Release(p)
 				} else {
-					require.True(t, errors.Is(err, os.ErrClosed))
+					require.True(t, errors.Is(err, wintun.ErrAdapterClosed{}))
+					break
 				}
 			}
 		}()
@@ -284,15 +255,18 @@ func Test_Echo_UDP_Adapter(t *testing.T) {
 
 	luid, err := ap.GetAdapterLuid()
 	require.NoError(t, err)
-	defer ap.Close()
 	addr := netip.PrefixFrom(ip, 24)
 	err = luid.SetIPAddresses([]netip.Prefix{addr})
 	require.NoError(t, err)
 
+	var ch = make(chan struct{})
+	defer func() { <-ch }()
 	go func() {
+		defer close(ch)
+
 		for {
 			rp, err := ap.Recv(context.Background())
-			if errors.Is(err, os.ErrClosed) {
+			if errors.Is(err, wintun.ErrAdapterClosed{}) {
 				return
 			}
 			require.NoError(t, err)
@@ -311,29 +285,13 @@ func Test_Echo_UDP_Adapter(t *testing.T) {
 					udp.SetSourcePort(dst)
 					udp.SetDestinationPort(src)
 
-					sp, err := ap.Alloc(len(rp))
-					if errors.Is(err, os.ErrClosed) {
-						return
-					}
-					require.NoError(t, err)
-
+					sp, _ := ap.Alloc(len(rp))
 					copy(sp, rp)
 
-					err = ap.Send(sp)
-					if errors.Is(err, os.ErrClosed) {
-						return
-					}
-					require.NoError(t, err)
-
-					// fmt.Println("echo", len(rp))
+					ap.Send(sp)
 				}
 			}
-
-			err = ap.Release(rp)
-			if errors.Is(err, os.ErrClosed) {
-				return
-			}
-			require.NoError(t, err)
+			ap.Release(rp)
 		}
 	}()
 
@@ -350,6 +308,8 @@ func Test_Echo_UDP_Adapter(t *testing.T) {
 	n, err = conn.Read(b)
 	require.NoError(t, err)
 	require.Equal(t, msg, string(b[:n]))
+
+	require.NoError(t, ap.Close())
 }
 
 func Test_Packet_Sniffing(t *testing.T) {

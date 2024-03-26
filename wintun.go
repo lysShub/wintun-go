@@ -4,7 +4,6 @@
 package wintun
 
 import (
-	"os"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -27,7 +26,7 @@ func Load[T string | Mem](p T) error {
 	global.Lock()
 	defer global.Unlock()
 	if global.dll != nil {
-		return ErrLoaded{}
+		return ErrWintunLoaded{}
 	}
 
 	var err error
@@ -50,15 +49,14 @@ func Load[T string | Mem](p T) error {
 	return errors.WithStack(err)
 }
 
-type ErrLoaded struct{}
+type ErrWintunLoaded struct{}
 
-func (ErrLoaded) Error() string {
-	return "wintun loaded"
-}
+func (ErrWintunLoaded) Error() string   { return "wintun loaded" }
+func (ErrWintunLoaded) Temporary() bool { return true }
 
-func (ErrLoaded) Temporary() bool {
-	return true
-}
+type ErrWintunNotLoad struct{}
+
+func (ErrWintunNotLoad) Error() string { return "wintun not load" }
 
 func Release() error {
 	global.Lock()
@@ -145,17 +143,10 @@ ret:
 }
 
 func (w *wintun) calln(trap uintptr, args ...uintptr) (r1, r2 uintptr, err error) {
-	// in wintun, all call without zero parameter
-	for _, e := range args {
-		if e == 0 {
-			return 0, 0, errors.WithMessagef(errors.WithStack(os.ErrClosed), "%v", args)
-		}
-	}
 	w.RLock()
 	defer w.RUnlock()
-
 	if w.dll == nil {
-		return 0, 0, errors.WithStack(os.ErrClosed)
+		return 0, 0, errors.WithStack(ErrWintunNotLoad{})
 	}
 
 	var e syscall.Errno
@@ -185,21 +176,12 @@ func CreateAdapter(name string, opts ...Option) (*Adapter, error) {
 		return nil, errors.WithStack(err)
 	}
 
-	var r1 uintptr
-	if o.guid == nil {
-		r1, _, err = global.calln(
-			global.procCreateAdapter,
-			uintptr(unsafe.Pointer(name16)),
-			uintptr(unsafe.Pointer(tunnelType16)),
-		)
-	} else {
-		r1, _, err = global.calln(
-			global.procCreateAdapter,
-			uintptr(unsafe.Pointer(name16)),
-			uintptr(unsafe.Pointer(tunnelType16)),
-			uintptr(unsafe.Pointer(o.guid)),
-		)
-	}
+	r1, _, err := global.calln(
+		global.procCreateAdapter,
+		uintptr(unsafe.Pointer(name16)),
+		uintptr(unsafe.Pointer(tunnelType16)),
+		uintptr(unsafe.Pointer(o.guid)),
+	)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
