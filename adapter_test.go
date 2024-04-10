@@ -210,14 +210,14 @@ func Test_RecvCtx(t *testing.T) {
 	}
 }
 
-func Test_Race_Recving_Close(t *testing.T) {
+func Test_Recving_Close(t *testing.T) {
 	// if remove Close and Recv mutex, will fatal Exception
 	require.NoError(t, wintun.Load(wintun.DLL))
 	defer wintun.Release()
 
 	for i := 0; i < 0xf; i++ {
 		func() {
-			ap, err := wintun.CreateAdapter("testracereccvingclose")
+			ap, err := wintun.CreateAdapter("testrecvingclose")
 			require.NoError(t, err)
 			defer ap.Close()
 

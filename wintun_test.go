@@ -263,7 +263,7 @@ func Test_Load(t *testing.T) {
 		defer wintun.Release()
 
 		err := wintun.Load(wintun.DLL)
-		require.True(t, errors.Is(err, wintun.ErrWintunLoaded{}))
+		require.True(t, errors.Is(err, wintun.ErrLoaded{}))
 		require.True(t,
 			err.(interface{ Temporary() bool }).Temporary(),
 		)
@@ -288,7 +288,7 @@ func Test_Load(t *testing.T) {
 func Test_Open(t *testing.T) {
 	t.Run("notload/open", func(t *testing.T) {
 		ap, err := wintun.OpenAdapter("xxx")
-		require.True(t, errors.Is(err, wintun.ErrWintunNotLoad{}))
+		require.True(t, errors.Is(err, wintun.ErrNotLoad{}))
 		require.Nil(t, ap)
 	})
 }

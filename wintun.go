@@ -26,7 +26,7 @@ func Load[T string | Mem](p T) error {
 	global.Lock()
 	defer global.Unlock()
 	if global.dll != nil {
-		return ErrWintunLoaded{}
+		return ErrLoaded{}
 	}
 
 	var err error
@@ -48,15 +48,6 @@ func Load[T string | Mem](p T) error {
 	err = global.init()
 	return errors.WithStack(err)
 }
-
-type ErrWintunLoaded struct{}
-
-func (ErrWintunLoaded) Error() string   { return "wintun loaded" }
-func (ErrWintunLoaded) Temporary() bool { return true }
-
-type ErrWintunNotLoad struct{}
-
-func (ErrWintunNotLoad) Error() string { return "wintun not load" }
 
 func Release() error {
 	global.Lock()
@@ -145,8 +136,8 @@ ret:
 func (w *wintun) calln(trap uintptr, args ...uintptr) (r1, r2 uintptr, err error) {
 	w.RLock()
 	defer w.RUnlock()
-	if w.dll == nil {
-		return 0, 0, errors.WithStack(ErrWintunNotLoad{})
+	if w.dll == nil || trap == 0 {
+		return 0, 0, errors.WithStack(ErrNotLoad{})
 	}
 
 	var e syscall.Errno
@@ -208,6 +199,7 @@ func OpenAdapter(name string) (*Adapter, error) {
 	return ap, ap.Start(MinRingCapacity)
 }
 
+// todo: https://git.zx2c4.com/wintun-go/tree/wintun.go
 func DriverVersion() (version uint32, err error) {
 	r0, _, err := global.calln(global.procGetRunningDriverVersion)
 	if err != nil {

@@ -16,19 +16,13 @@ import (
 )
 
 type Adapter struct {
-	sync.RWMutex
+	// when the handle/session is being used(recv/send etc.), can't Stop/Close,
+	// reference uint test Test_Recving_Close
+	mu sync.RWMutex
 
 	handle  uintptr
 	session uintptr
 }
-
-type ErrAdapterClosed struct{}
-
-func (ErrAdapterClosed) Error() string { return "adapter closed" }
-
-type ErrAdapterStoped struct{}
-
-func (ErrAdapterStoped) Error() string { return "adapter stoped" }
 
 func (a *Adapter) sessionLocked(trap uintptr, args ...uintptr) (r1, r2 uintptr, err error) {
 	if a.handle == 0 {
@@ -43,8 +37,8 @@ func (a *Adapter) Start(capacity uint32) (err error) {
 	if capacity < MinRingCapacity || MaxRingCapacity < capacity {
 		return errors.New("invalid ring buff capacity")
 	}
-	a.Lock()
-	defer a.Unlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	if a.handle == 0 {
 		return errors.WithStack(ErrAdapterClosed{})
@@ -62,8 +56,8 @@ func (a *Adapter) Start(capacity uint32) (err error) {
 }
 
 func (a *Adapter) Stop() error {
-	a.Lock()
-	defer a.Unlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return a.stopLocked()
 }
 
@@ -79,8 +73,8 @@ func (a *Adapter) stopLocked() error {
 }
 
 func (a *Adapter) Close() error {
-	a.Lock()
-	defer a.Unlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	if a.handle > 0 {
 		err := a.stopLocked()
@@ -98,8 +92,8 @@ func (a *Adapter) Close() error {
 }
 
 func (a *Adapter) GetAdapterLuid() (winipcfg.LUID, error) {
-	a.RLock()
-	defer a.RUnlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 
 	if a.handle == 0 {
 		return 0, errors.WithStack(ErrAdapterClosed{})
@@ -141,8 +135,8 @@ type rpack []byte
 
 // Recv receive outbound(income adapter) ip packet, after must call ap.Release(p)
 func (a *Adapter) Recv(ctx context.Context) (ip rpack, err error) {
-	a.RLock()
-	defer a.RUnlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 
 	var size uint32
 	for {
@@ -150,17 +144,24 @@ func (a *Adapter) Recv(ctx context.Context) (ip rpack, err error) {
 			global.procReceivePacket,
 			(uintptr)(unsafe.Pointer(&size)),
 		)
-		if r0 == 0 {
+
+		if r0 > 0 {
+			ptr := unsafe.Add(nil, r0)
+			return unsafe.Slice((*byte)(ptr), size), nil
+		} else {
 			if errors.Is(err, windows.ERROR_NO_MORE_ITEMS) {
-				hdl, err := a.getReadWaitEvent()
-				if err != nil {
+
+				var event uint32
+				if w, err := a.getReadWaitEvent(); err != nil {
 					return nil, errors.WithStack(err)
+				} else {
+					event, err = windows.WaitForSingleObject(w, 100)
+					if err != nil {
+						return nil, errors.WithStack(err)
+					}
 				}
-				e, err := windows.WaitForSingleObject(hdl, 100)
-				if err != nil {
-					return nil, errors.WithStack(err)
-				}
-				switch e {
+
+				switch event {
 				case windows.WAIT_OBJECT_0:
 				case uint32(windows.WAIT_TIMEOUT):
 					select {
@@ -169,16 +170,12 @@ func (a *Adapter) Recv(ctx context.Context) (ip rpack, err error) {
 					default:
 					}
 				default:
-					return nil, errors.Errorf("invalid WaitForSingleObject result %d", e)
+					return nil, errors.Errorf("invalid WaitForSingleObject event %d", event)
 				}
-				continue
 			} else {
 				return nil, err
 			}
 		}
-
-		ptr := unsafe.Add(nil, r0)
-		return unsafe.Slice((*byte)(ptr), size), nil
 	}
 }
 
@@ -186,8 +183,8 @@ func (a *Adapter) Release(p rpack) error {
 	if len(p) == 0 {
 		return nil
 	}
-	a.RLock()
-	defer a.RUnlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 
 	_, _, err := a.sessionLocked(
 		global.procReleaseReceivePacket,
@@ -202,8 +199,8 @@ func (a *Adapter) Alloc(size int) (spack, error) {
 	if size == 0 {
 		return spack{}, nil
 	}
-	a.RLock()
-	defer a.RUnlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 
 	r0, _, err := a.sessionLocked(
 		global.procAllocateSendPacket,
@@ -222,8 +219,8 @@ func (a *Adapter) Send(ip spack) error {
 	if len(ip) == 0 {
 		return nil
 	}
-	a.RLock()
-	defer a.RUnlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 
 	_, _, err := a.sessionLocked(
 		global.procSendPacket,
