@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"runtime"
+	"syscall"
 
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
@@ -59,7 +60,7 @@ func SetLogger(logger LoggerCallback) error {
 		}
 	}
 
-	_, _, err := global.calln(global.procSetLogger, callback)
+	_, _, err := syscall.SyscallN(procSetLogger.Addr(), callback)
 	if err != windows.ERROR_SUCCESS {
 		return errors.WithStack(err)
 	}

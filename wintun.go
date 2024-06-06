@@ -4,15 +4,13 @@
 package wintun
 
 import (
-	"sync"
 	"syscall"
 	"unsafe"
 
+	ddll "github.com/lysShub/divert-go/dll"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
 )
-
-var global = wintun{}
 
 func MustLoad[T string | Mem](p T) struct{} {
 	err := Load(p)
@@ -23,130 +21,39 @@ func MustLoad[T string | Mem](p T) struct{} {
 }
 
 func Load[T string | Mem](p T) error {
-	global.Lock()
-	defer global.Unlock()
-	if global.dll != nil {
+	if wintun.Loaded() {
 		return ErrLoaded{}
 	}
 
-	var err error
 	switch p := any(p).(type) {
 	case string:
-		global.dll, err = loadFileDLL(p)
-		if err != nil {
-			return errors.WithStack(err)
-		}
+		ddll.ResetLazyDll(wintun, p)
 	case Mem:
-		global.dll, err = loadMemDLL(p)
-		if err != nil {
-			return errors.WithStack(err)
-		}
+		ddll.ResetLazyDll(wintun, p)
 	default:
-		return windows.ERROR_INVALID_PARAMETER
+		panic("")
 	}
-
-	err = global.init()
-	return errors.WithStack(err)
+	return nil
 }
 
-func Release() error {
-	global.Lock()
-	defer global.Unlock()
-	if global.dll == nil {
-		return nil
-	}
+var (
+	wintun = ddll.NewLazyDLL("wintun.dll")
 
-	err := global.dll.Release()
-	global.dll = nil
-	return errors.WithStack(err)
-}
-
-type wintun struct {
-	sync.RWMutex
-	dll dll
-
-	procCreateAdapter           uintptr
-	procOpenAdapter             uintptr
-	procCloseAdapter            uintptr
-	procDeleteDriver            uintptr
-	procGetAdapterLuid          uintptr
-	procGetRunningDriverVersion uintptr
-	procSetLogger               uintptr
-	procStartSession            uintptr
-	procEndSession              uintptr
-	procGetReadWaitEvent        uintptr
-	procReceivePacket           uintptr
-	procReleaseReceivePacket    uintptr
-	procAllocateSendPacket      uintptr
-	procSendPacket              uintptr
-}
-
-func (w *wintun) init() (err error) {
-	if global.procCreateAdapter, err = global.dll.FindProc("WintunCreateAdapter"); err != nil {
-		goto ret
-	}
-	if global.procOpenAdapter, err = global.dll.FindProc("WintunOpenAdapter"); err != nil {
-		goto ret
-	}
-	if global.procCloseAdapter, err = global.dll.FindProc("WintunCloseAdapter"); err != nil {
-		goto ret
-	}
-	if global.procDeleteDriver, err = global.dll.FindProc("WintunDeleteDriver"); err != nil {
-		goto ret
-	}
-	if global.procGetAdapterLuid, err = global.dll.FindProc("WintunGetAdapterLUID"); err != nil {
-		goto ret
-	}
-	if global.procGetRunningDriverVersion, err = global.dll.FindProc("WintunGetRunningDriverVersion"); err != nil {
-		goto ret
-	}
-	if global.procSetLogger, err = global.dll.FindProc("WintunSetLogger"); err != nil {
-		goto ret
-	}
-	if global.procStartSession, err = global.dll.FindProc("WintunStartSession"); err != nil {
-		goto ret
-	}
-	if global.procEndSession, err = global.dll.FindProc("WintunEndSession"); err != nil {
-		goto ret
-	}
-	if global.procGetReadWaitEvent, err = global.dll.FindProc("WintunGetReadWaitEvent"); err != nil {
-		goto ret
-	}
-	if global.procReceivePacket, err = global.dll.FindProc("WintunReceivePacket"); err != nil {
-		goto ret
-	}
-	if global.procReleaseReceivePacket, err = global.dll.FindProc("WintunReleaseReceivePacket"); err != nil {
-		goto ret
-	}
-	if global.procAllocateSendPacket, err = global.dll.FindProc("WintunAllocateSendPacket"); err != nil {
-		goto ret
-	}
-	if global.procSendPacket, err = global.dll.FindProc("WintunSendPacket"); err != nil {
-		goto ret
-	}
-
-ret:
-	if err != nil {
-		w.dll.Release()
-		w.dll = nil
-	}
-	return err
-}
-
-func (w *wintun) calln(trap uintptr, args ...uintptr) (r1, r2 uintptr, err error) {
-	w.RLock()
-	defer w.RUnlock()
-	if w.dll == nil || trap == 0 {
-		return 0, 0, errors.WithStack(ErrNotLoad{})
-	}
-
-	var e syscall.Errno
-	r1, r2, e = syscall.SyscallN(trap, args...)
-	if e == windows.ERROR_SUCCESS {
-		return r1, r2, nil
-	}
-	return r1, r2, errors.WithStack(e)
-}
+	procCreateAdapter           = wintun.NewProc("CreateAdapter")
+	procOpenAdapter             = wintun.NewProc("OpenAdapter")
+	procCloseAdapter            = wintun.NewProc("CloseAdapter")
+	procDeleteDriver            = wintun.NewProc("DeleteDriver")
+	procGetAdapterLuid          = wintun.NewProc("GetAdapterLuid")
+	procGetRunningDriverVersion = wintun.NewProc("GetRunningDriverVersion")
+	procSetLogger               = wintun.NewProc("SetLogger")
+	procStartSession            = wintun.NewProc("StartSession")
+	procEndSession              = wintun.NewProc("EndSession")
+	procGetReadWaitEvent        = wintun.NewProc("GetReadWaitEvent")
+	procReceivePacket           = wintun.NewProc("ReceivePacket")
+	procReleaseReceivePacket    = wintun.NewProc("ReleaseReceivePacket")
+	procAllocateSendPacket      = wintun.NewProc("AllocateSendPacket")
+	procSendPacket              = wintun.NewProc("SendPacket")
+)
 
 func CreateAdapter(name string, opts ...Option) (*Adapter, error) {
 	if len(name) == 0 {
@@ -167,13 +74,13 @@ func CreateAdapter(name string, opts ...Option) (*Adapter, error) {
 		return nil, errors.WithStack(err)
 	}
 
-	r1, _, err := global.calln(
-		global.procCreateAdapter,
+	r1, _, err := syscall.SyscallN(
+		procCreateAdapter.Addr(),
 		uintptr(unsafe.Pointer(name16)),
 		uintptr(unsafe.Pointer(tunnelType16)),
 		uintptr(unsafe.Pointer(o.guid)),
 	)
-	if err != nil {
+	if err != windows.ERROR_SUCCESS {
 		return nil, errors.WithStack(err)
 	}
 	ap := &Adapter{handle: r1}
@@ -191,8 +98,8 @@ func OpenAdapter(name string) (*Adapter, error) {
 		return nil, errors.WithStack(err)
 	}
 
-	r1, _, err := global.calln(global.procOpenAdapter, uintptr(unsafe.Pointer(name16)))
-	if err != nil {
+	r1, _, err := syscall.SyscallN(procOpenAdapter.Addr(), uintptr(unsafe.Pointer(name16)))
+	if err != windows.ERROR_SUCCESS {
 		return nil, errors.WithStack(err)
 	}
 	ap := &Adapter{handle: r1}
@@ -201,16 +108,16 @@ func OpenAdapter(name string) (*Adapter, error) {
 
 // todo: https://git.zx2c4.com/wintun-go/tree/wintun.go
 func DriverVersion() (version uint32, err error) {
-	r0, _, err := global.calln(global.procGetRunningDriverVersion)
-	if err != nil {
+	r0, _, err := syscall.SyscallN(procGetRunningDriverVersion.Addr())
+	if err != windows.ERROR_SUCCESS {
 		return 0, errors.WithStack(err)
 	}
 	return uint32(r0), nil
 }
 
 func DeleteDriver() error {
-	_, _, err := global.calln(global.procDeleteDriver)
-	if err != nil {
+	_, _, err := syscall.SyscallN(procDeleteDriver.Addr())
+	if err != windows.ERROR_SUCCESS {
 		return errors.WithStack(err)
 	}
 	return nil

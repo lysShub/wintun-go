@@ -14,6 +14,7 @@ import (
 
 	"github.com/lysShub/wintun-go"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/windows"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/checksum"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -77,7 +78,6 @@ func buildICMP(t require.TestingT, src, dst []byte, typ header.ICMPv4Type, msg [
 func Test_Example(t *testing.T) {
 	// https://github.com/WireGuard/wintun/blob/master/example/example.c
 	require.NoError(t, wintun.Load(wintun.DLL))
-	defer wintun.Release()
 
 	// 10.6.7.7/24
 	var addr = netip.PrefixFrom(
@@ -156,7 +156,6 @@ func Test_DriverVersion(t *testing.T) {
 	t.Run("mem", func(t *testing.T) {
 
 		require.NoError(t, wintun.Load(wintun.DLL))
-		defer wintun.Release()
 
 		ver, err := wintun.DriverVersion()
 		require.NoError(t, err)
@@ -164,7 +163,6 @@ func Test_DriverVersion(t *testing.T) {
 	})
 	t.Run("file", func(t *testing.T) {
 		require.NoError(t, wintun.Load(dllPath))
-		defer wintun.Release()
 
 		ver, err := wintun.DriverVersion()
 		require.NoError(t, err)
@@ -175,7 +173,6 @@ func Test_DriverVersion(t *testing.T) {
 func Test_Logger(t *testing.T) {
 	t.Run("mem", func(t *testing.T) {
 		require.NoError(t, wintun.Load(wintun.DLL))
-		defer wintun.Release()
 
 		buff := bytes.NewBuffer(nil)
 		log := slog.New(slog.NewJSONHandler(buff, nil))
@@ -195,7 +192,6 @@ func Test_Logger(t *testing.T) {
 	})
 	t.Run("file", func(t *testing.T) {
 		require.NoError(t, wintun.Load(dllPath))
-		defer wintun.Release()
 
 		buff := bytes.NewBuffer(nil)
 		log := slog.New(slog.NewJSONHandler(buff, nil))
@@ -216,24 +212,7 @@ func Test_Logger(t *testing.T) {
 }
 
 func Test_Load(t *testing.T) {
-	t.Run("mem:load-release/load-release", func(t *testing.T) {
-		require.NoError(t, wintun.Load(wintun.DLL))
-		err := wintun.Release()
-		require.NoError(t, err)
-
-		require.NoError(t, wintun.Load(wintun.DLL))
-		err = wintun.Release()
-		require.NoError(t, err)
-	})
-	t.Run("file:load-release/load-release", func(t *testing.T) {
-		require.NoError(t, wintun.Load(dllPath))
-		err := wintun.Release()
-		require.NoError(t, err)
-
-		require.NoError(t, wintun.Load(dllPath))
-		err = wintun.Release()
-		require.NoError(t, err)
-	})
+	var _ = windows.ERROR_RING2SEG_MUST_BE_MOVABLE
 
 	t.Run("mem:load-fail", func(t *testing.T) {
 		err := wintun.Load(make(wintun.Mem, 64))
@@ -249,18 +228,11 @@ func Test_Load(t *testing.T) {
 		require.Error(t, err)
 
 		require.NoError(t, wintun.Load(dllPath))
-		defer wintun.Release()
-	})
-	t.Run("load-fail/release", func(t *testing.T) {
-		err := wintun.Load(make(wintun.Mem, 64))
-		require.Error(t, err)
 
-		require.NoError(t, wintun.Release())
 	})
 
 	t.Run("load/load", func(t *testing.T) {
 		require.NoError(t, wintun.Load(wintun.DLL))
-		defer wintun.Release()
 
 		err := wintun.Load(wintun.DLL)
 		require.True(t, errors.Is(err, wintun.ErrLoaded{}))
@@ -268,21 +240,7 @@ func Test_Load(t *testing.T) {
 			err.(interface{ Temporary() bool }).Temporary(),
 		)
 	})
-	t.Run("release/ralease", func(t *testing.T) {
-		err := wintun.Release()
-		require.NoError(t, err)
 
-		err = wintun.Release()
-		require.NoError(t, err)
-	})
-	t.Run("load/release/ralease", func(t *testing.T) {
-		require.NoError(t, wintun.Load(wintun.DLL))
-		err := wintun.Release()
-		require.NoError(t, err)
-
-		err = wintun.Release()
-		require.NoError(t, err)
-	})
 }
 
 func Test_Open(t *testing.T) {
