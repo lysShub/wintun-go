@@ -6,6 +6,7 @@ package wintun
 import (
 	"context"
 	"sync"
+	"syscall"
 
 	"github.com/pkg/errors"
 
@@ -30,7 +31,11 @@ func (a *Adapter) sessionLocked(trap uintptr, args ...uintptr) (r1, r2 uintptr, 
 	} else if a.session == 0 {
 		return 0, 0, errors.WithStack(ErrAdapterStoped{})
 	}
-	return global.calln(trap, append([]uintptr{a.session}, args...)...)
+	r1, r2, err = syscall.SyscallN(trap, append([]uintptr{a.session}, args...)...)
+	if err == windows.ERROR_SUCCESS {
+		err = nil
+	}
+	return r1, r2, errors.WithStack(err)
 }
 
 func (a *Adapter) Start(capacity uint32) (err error) {
@@ -43,12 +48,12 @@ func (a *Adapter) Start(capacity uint32) (err error) {
 	if a.handle == 0 {
 		return errors.WithStack(ErrAdapterClosed{})
 	}
-	fd, _, err := global.calln(
-		global.procStartSession,
+	fd, _, err := syscall.SyscallN(
+		procStartSession.Addr(),
 		a.handle,
 		uintptr(capacity),
 	)
-	if err != nil {
+	if err != windows.ERROR_SUCCESS {
 		return err
 	}
 	a.session = fd
@@ -63,8 +68,8 @@ func (a *Adapter) Stop() error {
 
 func (a *Adapter) stopLocked() error {
 	if a.session > 0 {
-		_, _, err := global.calln(global.procEndSession, uintptr(a.session))
-		if err != nil {
+		_, _, err := syscall.SyscallN(procEndSession.Addr(), uintptr(a.session))
+		if err != windows.ERROR_SUCCESS {
 			return err
 		}
 		a.session = 0
@@ -82,8 +87,8 @@ func (a *Adapter) Close() error {
 			return err
 		}
 
-		_, _, err = global.calln(global.procCloseAdapter, a.handle)
-		if err != nil {
+		_, _, err = syscall.SyscallN(procCloseAdapter.Addr(), a.handle)
+		if err != windows.ERROR_SUCCESS {
 			return err
 		}
 		a.handle = 0
@@ -99,12 +104,12 @@ func (a *Adapter) GetAdapterLuid() (winipcfg.LUID, error) {
 		return 0, errors.WithStack(ErrAdapterClosed{})
 	}
 	var luid uint64
-	_, _, err := global.calln(
-		global.procGetAdapterLuid,
+	_, _, err := syscall.SyscallN(
+		procGetAdapterLUID.Addr(),
 		a.handle,
 		uintptr(unsafe.Pointer(&luid)),
 	)
-	if err != nil {
+	if err != windows.ERROR_SUCCESS {
 		return 0, err
 	}
 	return winipcfg.LUID(luid), nil
@@ -124,7 +129,7 @@ func (a *Adapter) Index() (int, error) {
 }
 
 func (a *Adapter) getReadWaitEvent() (windows.Handle, error) {
-	r0, _, err := a.sessionLocked(global.procGetReadWaitEvent)
+	r0, _, err := a.sessionLocked(procGetReadWaitEvent.Addr())
 	if r0 == 0 {
 		return 0, err
 	}
@@ -141,7 +146,7 @@ func (a *Adapter) Recv(ctx context.Context) (ip rpack, err error) {
 	var size uint32
 	for {
 		r0, _, err := a.sessionLocked(
-			global.procReceivePacket,
+			procReceivePacket.Addr(),
 			(uintptr)(unsafe.Pointer(&size)),
 		)
 
@@ -187,7 +192,7 @@ func (a *Adapter) Release(p rpack) error {
 	defer a.mu.RUnlock()
 
 	_, _, err := a.sessionLocked(
-		global.procReleaseReceivePacket,
+		procReleaseReceivePacket.Addr(),
 		uintptr(unsafe.Pointer(&p[0])),
 	)
 	return err
@@ -203,7 +208,7 @@ func (a *Adapter) Alloc(size int) (spack, error) {
 	defer a.mu.RUnlock()
 
 	r0, _, err := a.sessionLocked(
-		global.procAllocateSendPacket,
+		procAllocateSendPacket.Addr(),
 		uintptr(size),
 	)
 	if r0 == 0 {
@@ -223,7 +228,7 @@ func (a *Adapter) Send(ip spack) error {
 	defer a.mu.RUnlock()
 
 	_, _, err := a.sessionLocked(
-		global.procSendPacket,
+		procSendPacket.Addr(),
 		uintptr(unsafe.Pointer(&ip[0])),
 	)
 	return err

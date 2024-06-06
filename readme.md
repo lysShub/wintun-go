@@ -21,7 +21,7 @@ import (
 // curl google.com
 func main() {
     wintun.MustLoad(wintun.DLL)
-    defer wintun.Release()
+    
 
     ips, err := net.DefaultResolver.LookupIP(context.Background(), "ip4", "google.com")
     if err != nil {
