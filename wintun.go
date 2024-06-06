@@ -7,14 +7,14 @@ import (
 	"syscall"
 	"unsafe"
 
-	ddll "github.com/lysShub/divert-go/dll"
+	"github.com/lysShub/divert-go/dll"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/windows"
 )
 
 func MustLoad[T string | Mem](p T) struct{} {
 	err := Load(p)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrLoaded{}) {
 		panic(err)
 	}
 	return struct{}{}
@@ -27,9 +27,9 @@ func Load[T string | Mem](p T) error {
 
 	switch p := any(p).(type) {
 	case string:
-		ddll.ResetLazyDll(wintun, p)
+		dll.ResetLazyDll(wintun, p)
 	case Mem:
-		ddll.ResetLazyDll(wintun, p)
+		dll.ResetLazyDll(wintun, []byte(p))
 	default:
 		panic("")
 	}
@@ -37,22 +37,22 @@ func Load[T string | Mem](p T) error {
 }
 
 var (
-	wintun = ddll.NewLazyDLL("wintun.dll")
+	wintun = dll.NewLazyDLL("wintun.dll")
 
-	procCreateAdapter           = wintun.NewProc("CreateAdapter")
-	procOpenAdapter             = wintun.NewProc("OpenAdapter")
-	procCloseAdapter            = wintun.NewProc("CloseAdapter")
-	procDeleteDriver            = wintun.NewProc("DeleteDriver")
-	procGetAdapterLuid          = wintun.NewProc("GetAdapterLuid")
-	procGetRunningDriverVersion = wintun.NewProc("GetRunningDriverVersion")
-	procSetLogger               = wintun.NewProc("SetLogger")
-	procStartSession            = wintun.NewProc("StartSession")
-	procEndSession              = wintun.NewProc("EndSession")
-	procGetReadWaitEvent        = wintun.NewProc("GetReadWaitEvent")
-	procReceivePacket           = wintun.NewProc("ReceivePacket")
-	procReleaseReceivePacket    = wintun.NewProc("ReleaseReceivePacket")
-	procAllocateSendPacket      = wintun.NewProc("AllocateSendPacket")
-	procSendPacket              = wintun.NewProc("SendPacket")
+	procCreateAdapter           = wintun.NewProc("WintunCreateAdapter")
+	procOpenAdapter             = wintun.NewProc("WintunOpenAdapter")
+	procCloseAdapter            = wintun.NewProc("WintunCloseAdapter")
+	procDeleteDriver            = wintun.NewProc("WintunDeleteDriver")
+	procGetAdapterLUID          = wintun.NewProc("WintunGetAdapterLUID")
+	procGetRunningDriverVersion = wintun.NewProc("WintunGetRunningDriverVersion")
+	procSetLogger               = wintun.NewProc("WintunSetLogger")
+	procStartSession            = wintun.NewProc("WintunStartSession")
+	procEndSession              = wintun.NewProc("WintunEndSession")
+	procGetReadWaitEvent        = wintun.NewProc("WintunGetReadWaitEvent")
+	procReceivePacket           = wintun.NewProc("WintunReceivePacket")
+	procReleaseReceivePacket    = wintun.NewProc("WintunReleaseReceivePacket")
+	procAllocateSendPacket      = wintun.NewProc("WintunAllocateSendPacket")
+	procSendPacket              = wintun.NewProc("WintunSendPacket")
 )
 
 func CreateAdapter(name string, opts ...Option) (*Adapter, error) {

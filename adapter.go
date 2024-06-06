@@ -31,7 +31,11 @@ func (a *Adapter) sessionLocked(trap uintptr, args ...uintptr) (r1, r2 uintptr, 
 	} else if a.session == 0 {
 		return 0, 0, errors.WithStack(ErrAdapterStoped{})
 	}
-	return syscall.SyscallN(trap, append([]uintptr{a.session}, args...)...)
+	r1, r2, err = syscall.SyscallN(trap, append([]uintptr{a.session}, args...)...)
+	if err == windows.ERROR_SUCCESS {
+		err = nil
+	}
+	return r1, r2, errors.WithStack(err)
 }
 
 func (a *Adapter) Start(capacity uint32) (err error) {
@@ -49,7 +53,7 @@ func (a *Adapter) Start(capacity uint32) (err error) {
 		a.handle,
 		uintptr(capacity),
 	)
-	if err != nil {
+	if err != windows.ERROR_SUCCESS {
 		return err
 	}
 	a.session = fd
@@ -84,7 +88,7 @@ func (a *Adapter) Close() error {
 		}
 
 		_, _, err = syscall.SyscallN(procCloseAdapter.Addr(), a.handle)
-		if err != nil {
+		if err != windows.ERROR_SUCCESS {
 			return err
 		}
 		a.handle = 0
@@ -101,7 +105,7 @@ func (a *Adapter) GetAdapterLuid() (winipcfg.LUID, error) {
 	}
 	var luid uint64
 	_, _, err := syscall.SyscallN(
-		procGetAdapterLuid.Addr(),
+		procGetAdapterLUID.Addr(),
 		a.handle,
 		uintptr(unsafe.Pointer(&luid)),
 	)

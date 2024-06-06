@@ -19,7 +19,7 @@ import (
 )
 
 func Test_Invalid_Ring_Capacity(t *testing.T) {
-	require.NoError(t, wintun.Load(wintun.DLL))
+	wintun.MustLoad(wintun.DLL)
 
 	t.Run("lesser", func(t *testing.T) {
 		ap, err := wintun.CreateAdapter("testinvalidringlesser")
@@ -46,7 +46,7 @@ func Test_Invalid_Ring_Capacity(t *testing.T) {
 }
 
 func Test_Adapter_Create(t *testing.T) {
-	require.NoError(t, wintun.Load(wintun.DLL))
+	wintun.MustLoad(wintun.DLL)
 
 	t.Run("create/start", func(t *testing.T) {
 		ap, err := wintun.CreateAdapter("createstart")
@@ -80,7 +80,7 @@ func Test_Adapter_Create(t *testing.T) {
 }
 
 func Test_Adapter_Stoped_Recv(t *testing.T) {
-	require.NoError(t, wintun.Load(wintun.DLL))
+	wintun.MustLoad(wintun.DLL)
 
 	ap, err := wintun.CreateAdapter("testadapterrwstoped")
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func Test_Adapter_Stoped_Recv(t *testing.T) {
 }
 
 func Test_Adapter_Index(t *testing.T) {
-	require.NoError(t, wintun.Load(wintun.DLL))
+	wintun.MustLoad(wintun.DLL)
 
 	name := "testadapterindex"
 
@@ -118,7 +118,7 @@ func Test_Adapter_Index(t *testing.T) {
 }
 
 func Test_Recv(t *testing.T) {
-	require.NoError(t, wintun.Load(wintun.DLL))
+	wintun.MustLoad(wintun.DLL)
 
 	var (
 		ip    = netip.AddrFrom4([4]byte{10, 1, 1, 11})
@@ -185,7 +185,7 @@ func Test_Recv(t *testing.T) {
 }
 
 func Test_RecvCtx(t *testing.T) {
-	require.NoError(t, wintun.Load(wintun.DLL))
+	wintun.MustLoad(wintun.DLL)
 
 	ap, err := wintun.CreateAdapter("rcecvctx")
 	require.NoError(t, err)
@@ -207,7 +207,7 @@ func Test_RecvCtx(t *testing.T) {
 
 func Test_Recving_Close(t *testing.T) {
 	// if remove Close and Recv mutex, will fatal Exception
-	require.NoError(t, wintun.Load(wintun.DLL))
+	wintun.MustLoad(wintun.DLL)
 
 	for i := 0; i < 0xf; i++ {
 		func() {
@@ -235,7 +235,7 @@ func Test_Recving_Close(t *testing.T) {
 }
 
 func Test_Echo_UDP_Adapter(t *testing.T) {
-	require.NoError(t, wintun.Load(wintun.DLL))
+	wintun.MustLoad(wintun.DLL)
 
 	var (
 		ip    = netip.AddrFrom4([4]byte{10, 0, 1, 3})
@@ -310,7 +310,7 @@ func Test_Packet_Sniffing(t *testing.T) {
 	t.Skip("todo：maybe not route")
 	// route add 0.0.0.0 mask 0.0.0.0 10.0.1.3 metric 5 if 116
 
-	require.NoError(t, wintun.Load(wintun.DLL))
+	wintun.MustLoad(wintun.DLL)
 
 	var (
 		ip    = netip.AddrFrom4([4]byte{10, 0, 1, 3})
@@ -372,7 +372,7 @@ func Test_Packet_Sniffing(t *testing.T) {
 }
 
 func Test_Session_Restart(t *testing.T) {
-	require.NoError(t, wintun.Load(wintun.DLL))
+	wintun.MustLoad(wintun.DLL)
 
 	ap, err := wintun.CreateAdapter("testsessionrestart")
 	require.NoError(t, err)

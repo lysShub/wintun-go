@@ -8,76 +8,71 @@ import (
 	"math/rand"
 	"net/netip"
 	"os"
+	"os/exec"
 	"runtime"
 	"testing"
 	"time"
 
 	"github.com/lysShub/wintun-go"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sys/windows"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/checksum"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 )
 
-func randPort() int {
-	for {
-		port := uint16(rand.Uint32())
-		if port > 2048 && port < 0xffff-0xff {
-			return int(port)
-		}
-	}
+func Test_Gofmt(t *testing.T) {
+	cmd := exec.Command("cmd", "/C", "gofmt", "-l", "-w", `.`)
+	out, err := cmd.CombinedOutput()
+
+	require.NoError(t, err)
+	require.Empty(t, string(out))
 }
 
-var dllPath = `.\embed\wintun_amd64.dll`
+func Test_Load(t *testing.T) {
+	// go test -list ".*" ./...
+	// and go test with -run flag
+	t.Skip("require independent test")
 
-func init() {
-	switch runtime.GOARCH {
-	case "amd64":
-	case "386":
-		dllPath = `.\embed\wintun_386.dll`
-	case "arm":
-		dllPath = `.\embed\wintun_arm.dll`
-	case "arm64":
-		dllPath = `.\embed\wintun_arm64.dll`
-	default:
-		panic("")
-	}
-}
+	t.Run("mem:load-fail", func(t *testing.T) {
+		require.NoError(t, wintun.Load(make(wintun.Mem, 64)))
 
-func buildICMP(t require.TestingT, src, dst []byte, typ header.ICMPv4Type, msg []byte) []byte {
-	require.Zero(t, len(msg)%4)
-
-	var p = make([]byte, 28+len(msg))
-	iphdr := header.IPv4(p)
-	iphdr.Encode(&header.IPv4Fields{
-		TOS:            0,
-		TotalLength:    uint16(len(p)),
-		ID:             uint16(rand.Uint32()),
-		Flags:          0,
-		FragmentOffset: 0,
-		TTL:            128,
-		Protocol:       uint8(header.ICMPv4ProtocolNumber),
-		Checksum:       0,
-		SrcAddr:        tcpip.AddrFromSlice(src),
-		DstAddr:        tcpip.AddrFromSlice(dst),
+		ap, err := wintun.CreateAdapter("testload0")
+		require.Error(t, err)
+		require.Nil(t, ap)
 	})
-	iphdr.SetChecksum(^checksum.Checksum(p[:iphdr.HeaderLength()], 0))
-	require.True(t, iphdr.IsChecksumValid())
+	t.Run("file:load-fail", func(t *testing.T) {
+		require.NoError(t, wintun.Load("./wintun.go"))
 
-	icmphdr := header.ICMPv4(iphdr.Payload())
-	icmphdr.SetType(typ)
-	icmphdr.SetIdent(0)
-	icmphdr.SetSequence(0)
-	icmphdr.SetChecksum(0)
-	copy(icmphdr.Payload(), msg)
-	icmphdr.SetChecksum(^checksum.Checksum(icmphdr, 0))
-	return p
+		ap, err := wintun.CreateAdapter("testload1")
+		require.Error(t, err)
+		require.Nil(t, ap)
+	})
+
+	t.Run("load-fail/load", func(t *testing.T) {
+		require.NoError(t, wintun.Load(make(wintun.Mem, 64)))
+
+		ap, err := wintun.CreateAdapter("testload2")
+		require.Error(t, err)
+		require.Nil(t, ap)
+
+		require.NoError(t, wintun.Load(dllPath))
+	})
+
+	t.Run("load/load", func(t *testing.T) {
+		wintun.MustLoad(wintun.DLL)
+
+		err := wintun.Load(wintun.DLL)
+		require.True(t, errors.Is(err, wintun.ErrLoaded{}))
+		require.True(t,
+			err.(interface{ Temporary() bool }).Temporary(),
+		)
+	})
+
 }
 
 func Test_Example(t *testing.T) {
 	// https://github.com/WireGuard/wintun/blob/master/example/example.c
-	require.NoError(t, wintun.Load(wintun.DLL))
+	wintun.MustLoad(wintun.DLL)
 
 	// 10.6.7.7/24
 	var addr = netip.PrefixFrom(
@@ -155,7 +150,7 @@ func Test_DriverVersion(t *testing.T) {
 	t.Skip("can't get driver version")
 	t.Run("mem", func(t *testing.T) {
 
-		require.NoError(t, wintun.Load(wintun.DLL))
+		wintun.MustLoad(wintun.DLL)
 
 		ver, err := wintun.DriverVersion()
 		require.NoError(t, err)
@@ -172,7 +167,7 @@ func Test_DriverVersion(t *testing.T) {
 
 func Test_Logger(t *testing.T) {
 	t.Run("mem", func(t *testing.T) {
-		require.NoError(t, wintun.Load(wintun.DLL))
+		wintun.MustLoad(wintun.DLL)
 
 		buff := bytes.NewBuffer(nil)
 		log := slog.New(slog.NewJSONHandler(buff, nil))
@@ -191,6 +186,7 @@ func Test_Logger(t *testing.T) {
 		require.Contains(t, buff.String(), "Creating")
 	})
 	t.Run("file", func(t *testing.T) {
+		t.Skip("require independent test")
 		require.NoError(t, wintun.Load(dllPath))
 
 		buff := bytes.NewBuffer(nil)
@@ -211,42 +207,66 @@ func Test_Logger(t *testing.T) {
 	})
 }
 
-func Test_Load(t *testing.T) {
-	var _ = windows.ERROR_RING2SEG_MUST_BE_MOVABLE
-
-	t.Run("mem:load-fail", func(t *testing.T) {
-		err := wintun.Load(make(wintun.Mem, 64))
-		require.Error(t, err)
-	})
-	t.Run("file:load-fail", func(t *testing.T) {
-		err := wintun.Load("./wintun.go")
-		require.Error(t, err)
-	})
-
-	t.Run("load-fail/load", func(t *testing.T) {
-		err := wintun.Load(make(wintun.Mem, 64))
-		require.Error(t, err)
-
-		require.NoError(t, wintun.Load(dllPath))
-
-	})
-
-	t.Run("load/load", func(t *testing.T) {
-		require.NoError(t, wintun.Load(wintun.DLL))
-
-		err := wintun.Load(wintun.DLL)
-		require.True(t, errors.Is(err, wintun.ErrLoaded{}))
-		require.True(t,
-			err.(interface{ Temporary() bool }).Temporary(),
-		)
-	})
-
-}
-
 func Test_Open(t *testing.T) {
 	t.Run("notload/open", func(t *testing.T) {
+		t.Skip("require independent test")
 		ap, err := wintun.OpenAdapter("xxx")
 		require.True(t, errors.Is(err, wintun.ErrNotLoad{}))
 		require.Nil(t, ap)
 	})
+}
+
+func randPort() int {
+	for {
+		port := uint16(rand.Uint32())
+		if port > 2048 && port < 0xffff-0xff {
+			return int(port)
+		}
+	}
+}
+
+var dllPath = `.\embed\wintun_amd64.dll`
+
+func init() {
+	switch runtime.GOARCH {
+	case "amd64":
+	case "386":
+		dllPath = `.\embed\wintun_386.dll`
+	case "arm":
+		dllPath = `.\embed\wintun_arm.dll`
+	case "arm64":
+		dllPath = `.\embed\wintun_arm64.dll`
+	default:
+		panic("")
+	}
+}
+
+func buildICMP(t require.TestingT, src, dst []byte, typ header.ICMPv4Type, msg []byte) []byte {
+	require.Zero(t, len(msg)%4)
+
+	var p = make([]byte, 28+len(msg))
+	iphdr := header.IPv4(p)
+	iphdr.Encode(&header.IPv4Fields{
+		TOS:            0,
+		TotalLength:    uint16(len(p)),
+		ID:             uint16(rand.Uint32()),
+		Flags:          0,
+		FragmentOffset: 0,
+		TTL:            128,
+		Protocol:       uint8(header.ICMPv4ProtocolNumber),
+		Checksum:       0,
+		SrcAddr:        tcpip.AddrFromSlice(src),
+		DstAddr:        tcpip.AddrFromSlice(dst),
+	})
+	iphdr.SetChecksum(^checksum.Checksum(p[:iphdr.HeaderLength()], 0))
+	require.True(t, iphdr.IsChecksumValid())
+
+	icmphdr := header.ICMPv4(iphdr.Payload())
+	icmphdr.SetType(typ)
+	icmphdr.SetIdent(0)
+	icmphdr.SetSequence(0)
+	icmphdr.SetChecksum(0)
+	copy(icmphdr.Payload(), msg)
+	icmphdr.SetChecksum(^checksum.Checksum(icmphdr, 0))
+	return p
 }
